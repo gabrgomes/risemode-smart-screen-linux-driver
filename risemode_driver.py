@@ -220,30 +220,38 @@ def poll_in_endpoint(dev, stop_event):
 
 def run():
     dev = find_device()
-
     stop_event = threading.Event()
     poller = threading.Thread(target=poll_in_endpoint, args=(dev, stop_event), daemon=True)
     poller.start()
 
-    print("Device claimed. Sending CONNECT...")
-    dev.write(EP_OUT, CONNECT_PACKET)
-    time.sleep(0.2)
-    session_start = time.time()
-    last_connect = session_start
-    frame_num = 0
-    print("Streaming (Ctrl+C to stop)...")
-    while True:
-        now = time.time()
-        if now - session_start > SESSION_MAX_S:
-            print("Proactive periodic reconnect...")
-            return
-        if now - last_connect > CONNECT_INTERVAL_S:
-            dev.write(EP_OUT, CONNECT_PACKET)
-            last_connect = now
-        jpeg = render_stats_image()
-        send_frame(dev, jpeg)
-        frame_num += 1
-        time.sleep(FRAME_INTERVAL_S)
+    try:
+        print("Device claimed. Sending CONNECT...")
+        dev.write(EP_OUT, CONNECT_PACKET)
+        time.sleep(0.2)
+        session_start = time.time()
+        last_connect = session_start
+        frame_num = 0
+        print("Streaming (Ctrl+C to stop)...")
+        while True:
+            now = time.time()
+            if now - session_start > SESSION_MAX_S:
+                print("Proactive periodic reconnect...")
+                return
+            if now - last_connect > CONNECT_INTERVAL_S:
+                dev.write(EP_OUT, CONNECT_PACKET)
+                last_connect = now
+            jpeg = render_stats_image()
+            send_frame(dev, jpeg)
+            frame_num += 1
+            time.sleep(FRAME_INTERVAL_S)
+    finally:
+        stop_event.set()
+        poller.join(timeout=1)
+        try:
+            usb.util.release_interface(dev, 0)
+        except usb.core.USBError:
+            pass
+        usb.util.dispose_resources(dev)
 
 
 def main():

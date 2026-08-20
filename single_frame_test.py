@@ -1,0 +1,70 @@
+#!/usr/bin/env python3
+"""Send exactly one frame, then idle indefinitely to observe how long it stays displayed."""
+import sys
+import time
+
+import usb.core
+import usb.util
+
+VENDOR_ID = 0x2100
+PRODUCT_ID = 0x0003
+EP_OUT = 0x01
+PACKET_SIZE = 1024
+
+CONNECT_PACKET = bytes.fromhex("4352540000434f4e4e454354") + b"\x00" * (
+    PACKET_SIZE - 12
+)
+
+
+def find_device():
+    dev = usb.core.find(idVendor=VENDOR_ID, idProduct=PRODUCT_ID)
+    if dev is None:
+        raise ValueError("Risemode device not found (2100:0003)")
+    for cfg in dev:
+        for intf in cfg:
+            if dev.is_kernel_driver_active(intf.bInterfaceNumber):
+                dev.detach_kernel_driver(intf.bInterfaceNumber)
+    dev.set_configuration()
+    usb.util.claim_interface(dev, 0)
+    return dev
+
+
+def build_draw_header(jpeg_len):
+    total_len = jpeg_len + 32
+    header = bytearray(32)
+    header[0:4] = b"CRT\x00"
+    header[4] = 0x00
+    header[5:8] = b"DRA"
+    header[8] = 0x00
+    header[9:12] = total_len.to_bytes(3, "big")
+    header[12] = 0xB1
+    return bytes(header)
+
+
+def send_frame(dev, jpeg_bytes):
+    payload = build_draw_header(len(jpeg_bytes)) + jpeg_bytes
+    pad_len = (-len(payload)) % PACKET_SIZE
+    payload += b"\x00" * pad_len
+    for i in range(0, len(payload), PACKET_SIZE):
+        dev.write(EP_OUT, payload[i : i + PACKET_SIZE])
+
+
+def main():
+    jpeg_path = sys.argv[1] if len(sys.argv) > 1 else "/home/gabriel/vms/frame1.jpg"
+    jpeg_bytes = open(jpeg_path, "rb").read()
+
+    dev = find_device()
+    dev.write(EP_OUT, CONNECT_PACKET)
+    time.sleep(0.2)
+
+    t0 = time.time()
+    send_frame(dev, jpeg_bytes)
+    print(f"[{time.time()-t0:.2f}s] frame sent")
+
+    for i in range(60):
+        time.sleep(1)
+        print(f"[{time.time()-t0:.2f}s] idle, still holding USB claim (report what panel shows)")
+
+
+if __name__ == "__main__":
+    sys.exit(main())

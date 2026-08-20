@@ -53,7 +53,7 @@ EP_OUT = 0x01
 PACKET_SIZE = 1024
 WIDTH, HEIGHT = 462, 1920
 CONNECT_INTERVAL_S = 8
-SESSION_MAX_S = 60  # proactively reconnect periodically; this firmware
+SESSION_MAX_S = 20  # proactively reconnect periodically; this firmware
                       # occasionally wedges itself after a while and only a
                       # fresh USB reset (done in find_device()) clears it
 FRAME_INTERVAL_S = 0.15

@@ -22,7 +22,9 @@ Header layout (32 bytes):
   12    0xB1                     constant marker
   13-31 0x00                     padding
 """
+import glob
 import io
+import os
 import subprocess
 import sys
 import threading
@@ -33,6 +35,10 @@ import psutil
 import usb.core
 import usb.util
 from PIL import Image, ImageDraw, ImageFont
+
+MANGOHUD_LOG_DIR = os.path.expanduser("~/.local/share/mangohud_logs")
+MANGOHUD_STALE_S = 3  # ignore logs that haven't been touched recently -
+                       # means no game/GL app is currently running
 
 
 def get_gpu_stats():
@@ -47,6 +53,29 @@ def get_gpu_stats():
     except (subprocess.SubprocessError, OSError, ValueError):
         return None, None
 
+
+def get_gpu_fps():
+    """Reads the live FPS of whatever game/GL app MangoHud is currently
+    logging (see README for setup). Returns None if nothing is running."""
+    try:
+        logs = glob.glob(os.path.join(MANGOHUD_LOG_DIR, "*.csv"))
+        if not logs:
+            return None
+        latest = max(logs, key=os.path.getmtime)
+        if time.time() - os.path.getmtime(latest) > MANGOHUD_STALE_S:
+            return None
+        with open(latest, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            size = f.tell()
+            f.seek(max(0, size - 4096))
+            lines = f.read().decode(errors="ignore").splitlines()
+        for line in reversed(lines):
+            if line and line[0].isdigit():
+                return float(line.split(",")[0])
+        return None
+    except (OSError, ValueError):
+        return None
+
 VENDOR_ID = 0x2100
 PRODUCT_ID = 0x0003
 EP_OUT = 0x01
@@ -56,7 +85,7 @@ CONNECT_INTERVAL_S = 8
 SESSION_MAX_S = 20  # proactively reconnect periodically; this firmware
                       # occasionally wedges itself after a while and only a
                       # fresh USB reset (done in find_device()) clears it
-FRAME_INTERVAL_S = 0.15
+FRAME_INTERVAL_S = 0.3
 
 CONNECT_PACKET = bytes.fromhex("4352540000434f4e4e454354") + b"\x00" * (
     PACKET_SIZE - 12
@@ -142,22 +171,21 @@ FONT_BIG = load_font(64)
 FONT_MED = load_font(36)
 
 
-_last_frame_time = None
 _fps_history = deque(maxlen=200)
 
 
 def render_stats_image():
-    global _last_frame_time
-    now = time.time()
-    fps = 1.0 / (now - _last_frame_time) if _last_frame_time else 0.0
-    _last_frame_time = now
-    _fps_history.append(fps)
-
-    fps_low1 = fps
-    if len(_fps_history) >= 10:
-        sample = sorted(_fps_history)
-        cutoff = max(1, len(sample) // 100)
-        fps_low1 = sum(sample[:cutoff]) / cutoff
+    fps = get_gpu_fps()
+    if fps is None:
+        _fps_history.clear()
+        fps_low1 = None
+    else:
+        _fps_history.append(fps)
+        fps_low1 = fps
+        if len(_fps_history) >= 10:
+            sample = sorted(_fps_history)
+            cutoff = max(1, len(sample) // 100)
+            fps_low1 = sum(sample[:cutoff]) / cutoff
 
     img = Image.new("RGB", (WIDTH, HEIGHT), (15, 15, 25))
     draw = ImageDraw.Draw(img)
@@ -191,12 +219,12 @@ def render_stats_image():
 
     draw.text((20, y), "FPS", font=FONT_MED, fill=(0, 200, 255))
     y += 44
-    draw.text((20, y), f"{fps:.1f}", font=FONT_BIG, fill=(255, 255, 255))
+    draw.text((20, y), f"{fps:.1f}" if fps is not None else "--", font=FONT_BIG, fill=(255, 255, 255))
     y += 90
 
     draw.text((20, y), "1% LOW", font=FONT_MED, fill=(0, 200, 255))
     y += 44
-    draw.text((20, y), f"{fps_low1:.1f}", font=FONT_BIG, fill=(255, 255, 255))
+    draw.text((20, y), f"{fps_low1:.1f}" if fps_low1 is not None else "--", font=FONT_BIG, fill=(255, 255, 255))
     y += 90
 
     y = HEIGHT - 140

@@ -35,7 +35,7 @@ Two firmware quirks discovered during reverse engineering, both handled by the d
 - Calling `SET_CONFIGURATION` when the device is already configured silently caps the display session to about a second. The driver only sets it if not already configured.
 - A `CONNECT` handshake packet (`"CRT\0\0CONNECT"` zero-padded to 1024 bytes) must be resent roughly every 10 seconds or the panel drops the session and goes black, even though every USB transfer keeps completing successfully.
 
-This cheap firmware also tends to accumulate bad internal state after repeated USB claim/release cycles (e.g. passing the device between a VM and the host). A plain USB bus reset (`usb.core.Device.reset()`) on startup clears it, and the driver proactively reconnects every 60 seconds as a safety net.
+This cheap firmware also tends to accumulate bad internal state after repeated USB claim/release cycles (e.g. passing the device between a VM and the host). A plain USB bus reset (`usb.core.Device.reset()`) on startup clears it, and the driver proactively reconnects every 20 seconds as a safety net (brief ~1s flash each cycle).
 
 Brightness control (`LIG` command) exists in the protocol but only produces a brief flash before reverting to the panel's own default — it does not appear to be a true persistent "set" on this firmware, so the driver does not use it.
 
@@ -52,6 +52,33 @@ Brightness control (`LIG` command) exists in the protocol but only produces a br
   Reload with `sudo udevadm control --reload-rules && sudo udevadm trigger`, and make sure your user is in the `plugdev` group.
 
 - (Optional, for GPU stats) `nvidia-smi` on the PATH.
+- (Optional, for the FPS / 1% low panel) [MangoHud](https://github.com/flightlessmango/MangoHud) configured to log continuously. Without it the panel shows `--` for FPS.
+
+### GPU FPS via MangoHud
+
+The FPS shown on the panel is the *real* frame rate of whatever game/GL app is currently running, read from MangoHud's own logging — not the driver's own frame-send rate.
+
+```
+sudo apt install mangohud
+```
+
+`~/.config/MangoHud/MangoHud.conf`:
+
+```ini
+output_folder=/home/YOUR_USER/.local/share/mangohud_logs
+autostart_log=1
+log_duration=999999
+log_interval=200
+no_display
+```
+
+`~/.config/environment.d/mangohud.conf` (takes effect on next login — enables the overlay automatically for Vulkan apps):
+
+```
+MANGOHUD=1
+```
+
+OpenGL apps aren't covered by the Vulkan implicit layer and need an explicit wrapper, e.g. `mangohud glxgears`, or Steam's launch option `mangohud %command%`.
 
 ## Setup
 

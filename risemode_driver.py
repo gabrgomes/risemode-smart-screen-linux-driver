@@ -58,7 +58,10 @@ def get_gpu_fps():
     """Reads the live FPS of whatever game/GL app MangoHud is currently
     logging (see README for setup). Returns None if nothing is running."""
     try:
-        logs = glob.glob(os.path.join(MANGOHUD_LOG_DIR, "*.csv"))
+        logs = [
+            p for p in glob.glob(os.path.join(MANGOHUD_LOG_DIR, "*.csv"))
+            if not p.endswith("_summary.csv")
+        ]
         if not logs:
             return None
         latest = max(logs, key=os.path.getmtime)

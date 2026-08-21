@@ -56,29 +56,28 @@ Brightness control (`LIG` command) exists in the protocol but only produces a br
 
 ### GPU FPS via MangoHud
 
-The FPS shown on the panel is the *real* frame rate of whatever game/GL app is currently running, read from MangoHud's own logging — not the driver's own frame-send rate.
+The FPS shown on the panel is the *real* frame rate of whatever game/GL app is currently running, read from MangoHud's own CSV logging — not the driver's own frame-send rate. `get_gpu_fps()` in the driver tails the newest non-summary CSV in `~/.local/share/mangohud_logs`.
 
 ```
 sudo apt install mangohud
 ```
 
-`~/.config/MangoHud/MangoHud.conf`:
+Getting this working reliably under Steam/Proton required working around a few real bugs/quirks, documented here so future-me doesn't have to rediscover them:
 
-```ini
-output_folder=/home/YOUR_USER/.local/share/mangohud_logs
-autostart_log=1
-log_duration=999999
-log_interval=200
-no_display
-```
+- **`no_display` disables logging entirely, not just the overlay.** This is a known upstream bug ([MangoHud#1782](https://github.com/flightlessmango/MangoHud/issues/1782), unresolved) — the overlay has to stay technically "on" for the metrics/logging code path to run at all. Workaround: keep it on but make it unobtrusive with `fps_only` (just the number, no graph/CPU/GPU clutter), a tiny `font_size`, no background box, and — since this MangoHud version has no alpha-channel/color-transparency support and the small logging-indicator dot it draws has a hardcoded, non-configurable 10px radius — pushing the whole HUD off-screen with a large negative `offset_x`/`offset_y` (e.g. `-3000`) so it renders outside the visible viewport instead of relying on transparency.
+- **A manually-built MangoHud (`mangohud-setup.sh`, v0.8.4) may not read `~/.config/MangoHud/MangoHud.conf` at all** — no "parsing config" log output ever appears despite the file existing with correct content/permissions, and this couldn't be pinned down further. Workaround: set `MANGOHUD_CONFIG` as an environment variable instead — it's read directly by the layer and takes priority over any file, sidestepping the issue.
+- **Steam's Proton sandbox (`pressure-vessel`) doesn't expose a manually-installed MangoHud** (`/usr/lib/mangohud`, as opposed to the apt package's standard system path) or the log output directory into the game's filesystem view. Needs `PRESSURE_VESSEL_FILESYSTEMS_RO=/usr/lib/mangohud` and `PRESSURE_VESSEL_FILESYSTEMS_RW=<log dir>`.
+- **Setting all of this globally via `~/.config/environment.d/` is unreliable** on at least this machine — `systemd --user`'s live environment kept silently reverting to stale values for reasons that couldn't be fully root-caused (not purely a login-timing issue; it happened without any new login too). Per-game Steam Launch Options don't have this problem, since the shell that launches the game evaluates the env-var prefix fresh on every single launch.
 
-`~/.config/environment.d/mangohud.conf` (takes effect on next login — enables the overlay automatically for Vulkan apps):
+The working config, applied as Steam Launch Options (not `environment.d`):
 
 ```
-MANGOHUD=1
+MANGOHUD_CONFIG=output_folder=/home/YOUR_USER/.local/share/mangohud_logs,autostart_log=1,log_duration=999999,log_interval=200,fps_only,font_size=10,hud_no_margin,background_alpha=0,alpha=0.15,position=top-left,text_color=000000,fps_color_change=0,engine_color=000000,offset_x=-3000,offset_y=-3000 PRESSURE_VESSEL_FILESYSTEMS_RO=/usr/lib/mangohud PRESSURE_VESSEL_FILESYSTEMS_RW=/home/YOUR_USER/.local/share/mangohud_logs mangohud %command%
 ```
 
-OpenGL apps aren't covered by the Vulkan implicit layer and need an explicit wrapper, e.g. `mangohud glxgears`, or Steam's launch option `mangohud %command%`.
+Setting this by hand for every game is tedious, so a separate helper script (`add_mangohud.py`, not part of this repo) bulk-applies — and re-applies, after tweaking the config above — this wrapper to every installed game's `localconfig.vdf` entry in one run. Steam must be fully closed first.
+
+OpenGL apps aren't covered by the Vulkan implicit layer and need an explicit wrapper too, e.g. `mangohud glxgears`.
 
 ## Setup
 

@@ -218,12 +218,14 @@ class SettingsApp:
         avail_w = max(self._preview_frame.winfo_width() - 2 * FRAME_PADDING, 50)
         heading_h = self.preview_heading.winfo_reqheight() + 8
         apply_h = self.apply_row.winfo_reqheight() + 8
-        # Cap to the controls column's own height (rather than
-        # preview_frame's, which stretches to fill the whole window) so
-        # the image+apply block ends at the same height as the controls -
-        # lining up the Apply button with the bottom of the left panel.
+        # Capping this to controls' own (fixed) height would line up Apply
+        # with its bottom, but then the preview would stop growing when
+        # the window is resized taller - fitting the available space
+        # takes priority, so this uses preview_frame's actual height
+        # (which does grow with the window) even though that means Apply
+        # only lines up with the controls column at/near minsize.
         avail_h = max(
-            self.controls.winfo_height() - 2 * FRAME_PADDING - heading_h - apply_h, 50
+            self._preview_frame.winfo_height() - 2 * FRAME_PADDING - heading_h - apply_h, 50
         )
 
         # Fit the panel's fixed 462x1920 aspect ratio into the available

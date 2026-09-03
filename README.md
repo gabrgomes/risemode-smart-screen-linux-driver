@@ -110,7 +110,11 @@ python3 -m venv venv
 
 Lets you pick a background image (or fall back to the live desktop wallpaper), toggle which sensors are shown, and recolor the panel, with a live preview of exactly what the panel would render. **Apply** just writes `~/.config/risemode-screen/config.json` — the running `risemode-screen` service picks it up on its very next frame (`get_config()` in `panel_render.py` is cached by mtime and reloads automatically), no restart needed.
 
-Every sensor block draws through the same 4 color roles (`panel_render.DEFAULT_COLORS`) rather than each having its own: **Labels** (e.g. "CPU", "GPU"), **Values** (the big numbers, and the clock's time), **Secondary readings** (temps, VRAM, power, and the clock's date), and the **Separator line** above the FPS/frame time section. The GUI's Colors section has a swatch button per role that opens the system color picker.
+Every sensor block draws through the same 4 color roles (`panel_render.DEFAULT_COLORS`) rather than each having its own: **Labels** (e.g. "CPU", "GPU"), **Values** (the big numbers, and the clock's time), **Secondary readings** (temps, VRAM, power, and the clock's date), and the **Separator line** above the FPS/frame time section. Three color modes, picked with a radio button in the GUI's Colors section:
+
+- **Default** — the fixed cyan/white/orange/dark-blue scheme shown above.
+- **Custom** — a swatch button per role opens the system color picker; only editable in this mode.
+- **Auto** — colors are derived from the current background image (`panel_render._compute_auto_colors()`), recomputed only when the background actually changes (cached alongside it, not recomputed every frame): the value/text color is a plain black-or-white pick based on the background's overall luminance (ITU-R BT.709 weighting) — whichever extreme contrasts more always reads clearly, rather than guessing at some in-between tone. Labels and secondary readings use the background's average color rotated to its complementary hue, with saturation/value pushed up so the accent doesn't just inherit a washed-out tone from the photo. The separator blends the value color partway into the average background tone, keeping it a subtle divider rather than a competing line.
 
 `risemode_driver.py` (the USB protocol/streaming loop) and `risemode_gui.py` (the settings window) both render frames through the shared `panel_render.py`, so the GUI's preview and the panel's actual output are always pixel-for-pixel the same.
 

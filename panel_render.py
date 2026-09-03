@@ -7,6 +7,7 @@ risemode_gui.py (renders an identical live preview from unsaved settings).
 Kept separate from risemode_driver.py so the GUI doesn't need to touch
 anything USB/device-specific to render a preview.
 """
+import colorsys
 import glob
 import io
 import json
@@ -67,6 +68,13 @@ COLOR_LABELS = {
     "separator": "Separator line",
 }
 
+COLOR_MODES = ("default", "custom", "auto")
+COLOR_MODE_LABELS = {
+    "default": "Default",
+    "custom": "Custom",
+    "auto": "Auto (from background)",
+}
+
 
 def load_config():
     """Reads the GUI-editable config from disk. A missing file, missing
@@ -82,7 +90,15 @@ def load_config():
     sensors.update(data.get("sensors", {}))
     colors = dict(DEFAULT_COLORS)
     colors.update(data.get("colors", {}))
-    return {"wallpaper": data.get("wallpaper"), "sensors": sensors, "colors": colors}
+    color_mode = data.get("color_mode", "default")
+    if color_mode not in COLOR_MODES:
+        color_mode = "default"
+    return {
+        "wallpaper": data.get("wallpaper"),
+        "sensors": sensors,
+        "colors": colors,
+        "color_mode": color_mode,
+    }
 
 
 def save_config(config):
@@ -243,7 +259,68 @@ def get_wallpaper_path():
     return None
 
 
-_background_cache = {"path": None, "mtime": None, "image": None}
+def _relative_luminance(rgb):
+    """Standard perceived-brightness weighting (ITU-R BT.709), 0 (black) to
+    1 (white) - human vision is far more sensitive to green than red or
+    blue, so a plain (r+g+b)/3 average would misjudge e.g. a pure-green
+    background as darker than it reads."""
+    r, g, b = (c / 255 for c in rgb)
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+def _compute_auto_colors(bg_img):
+    """Derives a color scheme from the background image, in two parts:
+
+    1. Value/text color: plain black-or-white choice based on the
+       background's overall luminance (the standard trick for guaranteed
+       legible text on an arbitrary background - whichever of the two
+       extremes has more contrast against the average brightness always
+       reads clearly, unlike trying to pick some "just right" mid-tone).
+    2. Label/secondary accent: the background's own average hue rotated
+       to its complementary (opposite the color wheel) - a basic color
+       harmony pick that reliably stands out against the dominant color
+       actually behind it, with saturation/value pushed up so it doesn't
+       just inherit a washed-out, low-contrast tone from the photo.
+
+    The separator blends the value color partway into the average
+    background tone, keeping it the same subtle, low-key divider the
+    fixed color schemes use rather than a high-contrast line competing
+    for attention.
+    """
+    avg_r, avg_g, avg_b = bg_img.resize((1, 1), Image.LANCZOS).getpixel((0, 0))[:3]
+    dark_bg = _relative_luminance((avg_r, avg_g, avg_b)) < 0.5
+
+    value_color = [255, 255, 255] if dark_bg else [20, 20, 20]
+
+    h, _s, _v = colorsys.rgb_to_hsv(avg_r / 255, avg_g / 255, avg_b / 255)
+    accent_hue = (h + 0.5) % 1.0
+    label_rgb = colorsys.hsv_to_rgb(accent_hue, 0.75, 1.0 if dark_bg else 0.65)
+    secondary_rgb = colorsys.hsv_to_rgb(
+        (accent_hue + 0.08) % 1.0, 0.85, 0.9 if dark_bg else 0.55
+    )
+
+    separator_color = [
+        round(0.35 * v + 0.65 * bg) for v, bg in zip(value_color, (avg_r, avg_g, avg_b))
+    ]
+
+    return {
+        "label": [round(c * 255) for c in label_rgb],
+        "value": value_color,
+        "secondary": [round(c * 255) for c in secondary_rgb],
+        "separator": separator_color,
+    }
+
+
+_background_cache = {"path": None, "mtime": None, "image": None, "auto_colors": None}
+
+
+def get_auto_colors(wallpaper_override=None):
+    """Colors derived from the current background image (see
+    _compute_auto_colors) - cached alongside the background itself in
+    load_background(), so this is only recomputed when the background
+    actually changes, not every frame."""
+    load_background(wallpaper_override)  # ensures the cache below is current
+    return _background_cache["auto_colors"] or DEFAULT_COLORS
 
 
 def load_background(wallpaper_override=None):
@@ -259,7 +336,15 @@ def load_background(wallpaper_override=None):
     else:
         path = get_wallpaper_path()
     if path is None or not os.path.isfile(path):
-        return Image.new("RGB", (WIDTH, HEIGHT), BG_FALLBACK)
+        fallback = Image.new("RGB", (WIDTH, HEIGHT), BG_FALLBACK)
+        if _background_cache["path"] is not None:
+            # was showing a real image before, now isn't - keep auto_colors
+            # in sync rather than leaving it stale from that last image.
+            _background_cache.update(
+                path=None, mtime=None, image=fallback,
+                auto_colors=_compute_auto_colors(fallback),
+            )
+        return fallback
 
     mtime = os.path.getmtime(path)
     if _background_cache["path"] == path and _background_cache["mtime"] == mtime:
@@ -283,7 +368,9 @@ def load_background(wallpaper_override=None):
     except (OSError, ValueError):
         img = Image.new("RGB", (WIDTH, HEIGHT), BG_FALLBACK)
 
-    _background_cache.update(path=path, mtime=mtime, image=img)
+    _background_cache.update(
+        path=path, mtime=mtime, image=img, auto_colors=_compute_auto_colors(img)
+    )
     return img
 
 _fps_history = deque(maxlen=200)
@@ -333,7 +420,13 @@ def render_stats_pil(config=None):
             cutoff = max(1, len(sample) // 100)
             fps_low1 = sum(sample[:cutoff]) / cutoff
 
-    colors = config.get("colors", DEFAULT_COLORS)
+    color_mode = config.get("color_mode", "default")
+    if color_mode == "custom":
+        colors = config.get("colors", DEFAULT_COLORS)
+    elif color_mode == "auto":
+        colors = get_auto_colors(config.get("wallpaper"))
+    else:
+        colors = DEFAULT_COLORS
     label_color = tuple(colors["label"])
     value_color = tuple(colors["value"])
     secondary_color = tuple(colors["secondary"])

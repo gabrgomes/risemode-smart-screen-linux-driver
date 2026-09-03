@@ -96,6 +96,15 @@ class SettingsApp:
         colors_frame = ttk.LabelFrame(controls, text="Colors", padding=12)
         colors_frame.pack(fill="x", pady=(0, 16))
 
+        self.color_mode = tk.StringVar(value=config.get("color_mode", "default"))
+        mode_row = ttk.Frame(colors_frame)
+        mode_row.pack(fill="x", pady=(0, 10))
+        for mode, label in pr.COLOR_MODE_LABELS.items():
+            ttk.Radiobutton(
+                mode_row, text=label, variable=self.color_mode, value=mode,
+                command=self._sync_color_mode_state,
+            ).pack(anchor="w")
+
         self.colors = {k: list(config["colors"][k]) for k in pr.COLOR_LABELS}
         self.color_buttons = {}
         for key, label in pr.COLOR_LABELS.items():
@@ -106,7 +115,7 @@ class SettingsApp:
                              command=lambda k=key: self._pick_color(k))
             btn.pack(side="left")
             self.color_buttons[key] = btn
-            self._update_color_button(key)
+        self._sync_color_mode_state()
 
         # --- Apply ---
         apply_row = ttk.Frame(controls)
@@ -156,9 +165,24 @@ class SettingsApp:
     def _rgb_to_hex(rgb):
         return "#%02x%02x%02x" % tuple(rgb)
 
-    def _update_color_button(self, key):
-        hexcolor = self._rgb_to_hex(self.colors[key])
+    def _set_color_button(self, key, rgb):
+        hexcolor = self._rgb_to_hex(rgb)
         self.color_buttons[key].configure(bg=hexcolor, activebackground=hexcolor)
+
+    def _sync_color_mode_state(self):
+        # Swatches always show whichever colors are actually in effect -
+        # only editable (and only meaningful to click) in "custom" mode.
+        # "auto" is kept live-updated by _tick_preview() instead, since it
+        # depends on the current background.
+        mode = self.color_mode.get()
+        for key in self.color_buttons:
+            self.color_buttons[key].configure(state="normal" if mode == "custom" else "disabled")
+        if mode == "default":
+            for key in self.color_buttons:
+                self._set_color_button(key, pr.DEFAULT_COLORS[key])
+        elif mode == "custom":
+            for key in self.color_buttons:
+                self._set_color_button(key, self.colors[key])
 
     def _pick_color(self, key):
         rgb, _hexcolor = colorchooser.askcolor(
@@ -167,7 +191,7 @@ class SettingsApp:
         )
         if rgb is not None:
             self.colors[key] = [round(c) for c in rgb]
-            self._update_color_button(key)
+            self._set_color_button(key, self.colors[key])
 
     def _config_from_widgets(self):
         wallpaper = self.wp_path.get().strip() if self.wp_mode.get() == "custom" else None
@@ -175,6 +199,7 @@ class SettingsApp:
             "wallpaper": wallpaper or None,
             "sensors": {k: v.get() for k, v in self.sensor_vars.items()},
             "colors": {k: list(v) for k, v in self.colors.items()},
+            "color_mode": self.color_mode.get(),
         }
 
     def _apply(self):
@@ -213,8 +238,13 @@ class SettingsApp:
         self.preview_label.configure(image=self._preview_photo)
 
     def _tick_preview(self):
-        self._last_pil_img = pr.render_stats_pil(self._config_from_widgets())
+        config = self._config_from_widgets()
+        self._last_pil_img = pr.render_stats_pil(config)
         self._on_preview_resize()  # also re-fits size in case it drifted
+        if self.color_mode.get() == "auto":
+            auto_colors = pr.get_auto_colors(config["wallpaper"])
+            for key, rgb in auto_colors.items():
+                self._set_color_button(key, rgb)
         self.root.after(PREVIEW_REFRESH_MS, self._tick_preview)
 
 

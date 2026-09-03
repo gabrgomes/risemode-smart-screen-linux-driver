@@ -68,9 +68,8 @@ COLOR_LABELS = {
     "separator": "Separator line",
 }
 
-COLOR_MODES = ("default", "custom", "auto")
+COLOR_MODES = ("custom", "auto")
 COLOR_MODE_LABELS = {
-    "default": "Default",
     "custom": "Custom",
     "auto": "Auto (from background)",
 }
@@ -90,9 +89,9 @@ def load_config():
     sensors.update(data.get("sensors", {}))
     colors = dict(DEFAULT_COLORS)
     colors.update(data.get("colors", {}))
-    color_mode = data.get("color_mode", "default")
+    color_mode = data.get("color_mode", "custom")
     if color_mode not in COLOR_MODES:
-        color_mode = "default"
+        color_mode = "custom"
     return {
         "wallpaper": data.get("wallpaper"),
         "sensors": sensors,
@@ -448,13 +447,10 @@ def render_stats_pil(config=None):
             cutoff = max(1, len(sample) // 100)
             fps_low1 = sum(sample[:cutoff]) / cutoff
 
-    color_mode = config.get("color_mode", "default")
-    if color_mode == "custom":
-        colors = config.get("colors", DEFAULT_COLORS)
-    elif color_mode == "auto":
+    if config.get("color_mode", "custom") == "auto":
         colors = get_auto_colors(config.get("wallpaper"))
     else:
-        colors = DEFAULT_COLORS
+        colors = config.get("colors", DEFAULT_COLORS)
     label_color = tuple(colors["label"])
     value_color = tuple(colors["value"])
     secondary_color = tuple(colors["secondary"])

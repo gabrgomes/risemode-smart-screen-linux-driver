@@ -97,7 +97,7 @@ class SettingsApp:
         colors_frame = ttk.LabelFrame(controls, text="Colors", padding=12)
         colors_frame.pack(fill="x", pady=(0, 16))
 
-        self.color_mode = tk.StringVar(value=config.get("color_mode", "default"))
+        self.color_mode = tk.StringVar(value=config.get("color_mode", "custom"))
         mode_row = ttk.Frame(colors_frame)
         mode_row.pack(fill="x", pady=(0, 10))
         for mode, label in pr.COLOR_MODE_LABELS.items():
@@ -178,10 +178,7 @@ class SettingsApp:
         mode = self.color_mode.get()
         for key in self.color_buttons:
             self.color_buttons[key].configure(state="normal" if mode == "custom" else "disabled")
-        if mode == "default":
-            for key in self.color_buttons:
-                self._set_color_button(key, pr.DEFAULT_COLORS[key])
-        elif mode == "custom":
+        if mode == "custom":
             for key in self.color_buttons:
                 self._set_color_button(key, self.colors[key])
 

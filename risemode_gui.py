@@ -117,18 +117,18 @@ class SettingsApp:
             self.color_buttons[key] = btn
         self._sync_color_mode_state()
 
-        # --- Apply ---
-        apply_row = ttk.Frame(controls)
-        apply_row.pack(fill="x")
-        ttk.Button(apply_row, text="Apply", command=self._apply).pack(side="left", ipadx=10, ipady=4)
-        self.status = ttk.Label(apply_row, text="")
-        self.status.pack(side="left", padx=10)
-
         # --- Preview ---
         self.preview_heading = ttk.Label(preview_frame, text="Live preview", style="Heading.TLabel")
         self.preview_heading.grid(row=0, column=0, pady=(0, 8))
         self.preview_label = ttk.Label(preview_frame, anchor="center")
         self.preview_label.grid(row=1, column=0, sticky="nsew")
+
+        # --- Apply --- (below the preview, not the controls column)
+        self.apply_row = ttk.Frame(preview_frame)
+        self.apply_row.grid(row=2, column=0, pady=(8, 0))
+        ttk.Button(self.apply_row, text="Apply", command=self._apply).pack(side="left", ipadx=10, ipady=4)
+        self.status = ttk.Label(self.apply_row, text="")
+        self.status.pack(side="left", padx=10)
 
         self._preview_frame = preview_frame
         self._last_pil_img = None
@@ -216,8 +216,9 @@ class SettingsApp:
         # out along with the heading label's own height.
         avail_w = max(self._preview_frame.winfo_width() - 2 * FRAME_PADDING, 50)
         heading_h = self.preview_heading.winfo_reqheight() + 8
+        apply_h = self.apply_row.winfo_reqheight() + 8
         avail_h = max(
-            self._preview_frame.winfo_height() - 2 * FRAME_PADDING - heading_h, 50
+            self._preview_frame.winfo_height() - 2 * FRAME_PADDING - heading_h - apply_h, 50
         )
 
         # Fit the panel's fixed 462x1920 aspect ratio into the available

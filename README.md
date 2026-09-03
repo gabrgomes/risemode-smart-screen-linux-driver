@@ -89,6 +89,14 @@ OpenGL apps aren't covered by the Vulkan implicit layer and need an explicit wra
 ## Setup
 
 ```bash
+./install.sh
+```
+
+Installs missing system packages (`python3-venv`, `python3-tk`, `libusb-1.0-0`, and optionally `mangohud`), sets up the Python virtual environment, installs the udev rule and adds you to the `plugdev` group if needed, installs and starts the `risemode-screen` systemd user service, and adds a "Risemode Smart Screen Settings" entry to your application menu for `risemode_gui.py`. Safe to re-run - every step is idempotent. Only the udev rule step needs `sudo`.
+
+To do it by hand instead (or if you just want the driver without the service/menu entry):
+
+```bash
 python3 -m venv venv
 ./venv/bin/pip install -r requirements.txt
 ./venv/bin/python3 risemode_driver.py
@@ -104,7 +112,11 @@ Lets you pick a background image (or fall back to the live desktop wallpaper) an
 
 `risemode_driver.py` (the USB protocol/streaming loop) and `risemode_gui.py` (the settings window) both render frames through the shared `panel_render.py`, so the GUI's preview and the panel's actual output are always pixel-for-pixel the same.
 
+`icon.png` is Rise Mode's own logo (from their site's favicon), used for the application menu shortcut `install.sh` sets up.
+
 ## Running as a systemd user service
+
+`./install.sh` already does this. To set it up by hand instead:
 
 ```ini
 # ~/.config/systemd/user/risemode-screen.service

@@ -28,7 +28,10 @@ else
     echo "All required system packages already installed."
 fi
 
-if ! dpkg -s mangohud >/dev/null 2>&1; then
+if ! command -v mangohud >/dev/null 2>&1; then
+    # Checks the actual command, not dpkg - a manually-built MangoHud
+    # (see the mangohud-setup.sh note in the README) won't be dpkg-tracked
+    # even though it's fully installed and working.
     echo
     echo "MangoHud isn't installed (optional - needed for the FPS/1% low/"
     echo "frame time sensors; without it the panel just shows -- for those)."

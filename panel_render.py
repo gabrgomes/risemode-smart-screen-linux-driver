@@ -366,9 +366,9 @@ def render_stats_pil(config=None):
 
     if sensors.get("clock", True):
         y = HEIGHT - 140
-        draw.text((20, y), time.strftime("%H:%M:%S"), font=FONT_BIG, fill=(255, 255, 0))
+        draw.text((20, y), time.strftime("%H:%M:%S"), font=FONT_BIG, fill=(255, 255, 255))
         y += 70
-        draw.text((20, y), time.strftime("%d-%m-%Y"), font=FONT_DATE, fill=(200, 200, 200))
+        draw.text((20, y), time.strftime("%d-%m-%Y"), font=FONT_DATE, fill=(255, 150, 0))
 
     return img
 

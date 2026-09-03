@@ -325,7 +325,7 @@ def render_stats_pil(config=None):
     if sensors.get("cpu", True):
         secondary = []
         if sensors.get("cpu_temp", True) and cpu_temp is not None:
-            secondary.append((f"{cpu_temp:.0f}C", (255, 150, 0)))
+            secondary.append((f"{cpu_temp:.0f}°C", (255, 150, 0)))
         y = _draw_device_block(draw, y, "CPU", f"{cpu:.0f}%", secondary)
 
     if sensors.get("ram", True):
@@ -334,7 +334,7 @@ def render_stats_pil(config=None):
     if sensors.get("gpu", True) and gpu_load is not None:
         secondary = []
         if gpu_temp is not None:
-            secondary.append((f"{gpu_temp:.0f}C", (255, 150, 0)))
+            secondary.append((f"{gpu_temp:.0f}°C", (255, 150, 0)))
         if sensors.get("gpu_vram", True) and gpu_vram_used is not None:
             secondary.append((f"{gpu_vram_used / 1024:.1f}GB", (255, 150, 0)))
         if sensors.get("gpu_power", True) and gpu_power is not None:

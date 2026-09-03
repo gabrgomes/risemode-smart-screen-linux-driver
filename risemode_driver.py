@@ -36,6 +36,9 @@ PRODUCT_ID = 0x0003
 EP_OUT = 0x01
 PACKET_SIZE = 1024
 CONNECT_INTERVAL_S = 8
+SESSION_MAX_S = 20  # proactively reconnect periodically; this firmware
+                      # occasionally wedges itself after a while and only a
+                      # fresh USB reset (done in find_device()) clears it
 FRAME_INTERVAL_S = 0.3
 
 CONNECT_PACKET = bytes.fromhex("4352540000434f4e4e454354") + b"\x00" * (
@@ -75,16 +78,9 @@ def find_device():
 
     # This firmware accumulates bad internal state across repeated
     # claim/release cycles (e.g. handing the device to/from a VM). A plain
-    # USB bus reset clears it. find_device() is only called once at startup
-    # and then reactively if a write actually fails (see main()) - it used
-    # to also be called every 20s as a proactive "safety net" against a
-    # wedge that in practice never seemed to actually happen under a
-    # continuous, single claimed session (only after repeated claim/release,
-    # e.g. VM/host handoff during development). That safety net was itself
-    # the cause of a visible ~1s blackout every 20s, which the real Windows
-    # driver doesn't do - it just holds one continuous session. Removed;
-    # see the "Keeping the session alive" note in the README if a genuine
-    # long-uptime wedge ever resurfaces.
+    # USB bus reset clears it; without this the panel will render for only
+    # ~1-3 seconds before going dark, even though every USB transfer keeps
+    # completing successfully.
     dev.reset()
     time.sleep(0.5)
     dev = usb.core.find(idVendor=VENDOR_ID, idProduct=PRODUCT_ID)
@@ -131,11 +127,15 @@ def run():
         print("Device claimed. Sending CONNECT...")
         dev.write(EP_OUT, CONNECT_PACKET)
         time.sleep(0.2)
-        last_connect = time.time()
+        session_start = time.time()
+        last_connect = session_start
         frame_num = 0
         print("Streaming (Ctrl+C to stop)...")
         while True:
             now = time.time()
+            if now - session_start > SESSION_MAX_S:
+                print("Proactive periodic reconnect...")
+                return
             if now - last_connect > CONNECT_INTERVAL_S:
                 dev.write(EP_OUT, CONNECT_PACKET)
                 last_connect = now

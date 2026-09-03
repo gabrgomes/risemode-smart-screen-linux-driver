@@ -35,13 +35,7 @@ Two firmware quirks discovered during reverse engineering, both handled by the d
 - Calling `SET_CONFIGURATION` when the device is already configured silently caps the display session to about a second. The driver only sets it if not already configured.
 - A `CONNECT` handshake packet (`"CRT\0\0CONNECT"` zero-padded to 1024 bytes) must be resent roughly every 10 seconds or the panel drops the session and goes black, even though every USB transfer keeps completing successfully.
 
-This cheap firmware also tends to accumulate bad internal state after repeated USB claim/release cycles (e.g. passing the device between a VM and the host, which happened a lot during reverse engineering). A plain USB bus reset (`usb.core.Device.reset()`) clears it.
-
-### Keeping the session alive (not resetting every 20 seconds)
-
-An earlier version of this driver, out of caution about the claim/release-cycle issue above, proactively tore the whole session down and reset the device every 20 seconds "as a safety net" — which meant a real, visible ~1s blackout every 20 seconds, indefinitely, by design. That's very likely what the real Windows driver *doesn't* do: it almost certainly just claims the device once and holds one continuous session for as long as the app runs, using the `CONNECT` keep-alive alone to keep the firmware happy.
-
-The driver now does the same: `find_device()` (which includes the bus reset) only runs once at startup, and again reactively if a write actually fails — not on a timer. The wedge that motivated the original workaround was only ever observed after repeated claim/release, not during a long continuous session, so removing the proactive reset should have no downside under normal use. If a genuine long-uptime wedge does resurface, the fix is to add a much longer interval (hours, not seconds) rather than reintroducing a 20-second one, or to inspect what the IN endpoint (`0x82`, currently just polled and discarded in `poll_in_endpoint()`) actually reports — the firmware may signal its own health there.
+This cheap firmware also tends to accumulate bad internal state after repeated USB claim/release cycles (e.g. passing the device between a VM and the host). A plain USB bus reset (`usb.core.Device.reset()`) on startup clears it, and the driver proactively reconnects every 20 seconds as a safety net (brief ~1s flash each cycle).
 
 Brightness control (`LIG` command) exists in the protocol but only produces a brief flash before reverting to the panel's own default — it does not appear to be a true persistent "set" on this firmware, so the driver does not use it.
 
@@ -133,7 +127,7 @@ systemctl --user daemon-reload
 systemctl --user enable --now risemode-screen.service
 ```
 
-If the panel ever goes dark and doesn't self-recover (the driver reconnects reactively when a write actually fails, see [Keeping the session alive](#keeping-the-session-alive-not-resetting-every-20-seconds)), `systemctl --user restart risemode-screen` clears it.
+If the panel ever goes dark and doesn't self-recover within a proactive-reconnect cycle, `systemctl --user restart risemode-screen` clears it.
 
 ## Debugging tools
 

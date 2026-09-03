@@ -36,7 +36,7 @@ PRODUCT_ID = 0x0003
 EP_OUT = 0x01
 PACKET_SIZE = 1024
 CONNECT_INTERVAL_S = 5
-SESSION_MAX_S = 5  # proactively reconnect periodically; this firmware
+SESSION_MAX_S = 2  # proactively reconnect periodically; this firmware
                       # occasionally wedges itself after a while and only a
                       # fresh USB reset (done in find_device()) clears it
 FRAME_INTERVAL_S = 0.15  # was doubled to 0.3 in cf43246 purely for lower

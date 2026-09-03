@@ -57,13 +57,18 @@ echo "Done."
 echo
 
 # --- 3. udev rule for non-root device access ----------------------------
-echo "-- Installing udev rule --"
+echo "-- Checking udev rule --"
 UDEV_RULE_PATH="/etc/udev/rules.d/99-risemode-screen.rules"
 UDEV_RULE='SUBSYSTEM=="usb", ATTR{idVendor}=="2100", ATTR{idProduct}=="0003", MODE="0660", GROUP="plugdev", TAG+="uaccess"'
-echo "$UDEV_RULE" | sudo tee "$UDEV_RULE_PATH" >/dev/null
-sudo udevadm control --reload-rules
-sudo udevadm trigger
-echo "Installed $UDEV_RULE_PATH"
+if [ -f "$UDEV_RULE_PATH" ] && [ "$(cat "$UDEV_RULE_PATH")" = "$UDEV_RULE" ]; then
+    echo "Already installed at $UDEV_RULE_PATH - skipping (needs sudo otherwise)."
+else
+    echo "Installing udev rule (needs sudo)..."
+    echo "$UDEV_RULE" | sudo tee "$UDEV_RULE_PATH" >/dev/null
+    sudo udevadm control --reload-rules
+    sudo udevadm trigger
+    echo "Installed $UDEV_RULE_PATH"
+fi
 
 NEED_RELOGIN=0
 if ! groups "$USER" | grep -qw plugdev; then

@@ -33,7 +33,7 @@ BG_FALLBACK = (15, 15, 25)
 CONFIG_PATH = os.path.expanduser("~/.config/risemode-screen/config.json")
 DEFAULT_SENSORS = {
     "cpu": True, "cpu_temp": True, "ram": True,
-    "gpu": True, "gpu_vram": True, "gpu_power": True,
+    "gpu": True, "gpu_temp": True, "gpu_vram": True, "gpu_power": True,
     "fps": True, "frametime": True,
     "clock": True,
 }
@@ -41,7 +41,8 @@ SENSOR_LABELS = {
     "cpu": "CPU usage",
     "cpu_temp": "CPU temperature",
     "ram": "RAM usage",
-    "gpu": "GPU usage / temp",
+    "gpu": "GPU usage",
+    "gpu_temp": "GPU temperature",
     "gpu_vram": "GPU VRAM usage",
     "gpu_power": "GPU power draw",
     "fps": "FPS / 1% low",
@@ -333,7 +334,7 @@ def render_stats_pil(config=None):
 
     if sensors.get("gpu", True) and gpu_load is not None:
         secondary = []
-        if gpu_temp is not None:
+        if sensors.get("gpu_temp", True) and gpu_temp is not None:
             secondary.append((f"{gpu_temp:.0f}°C", (255, 150, 0)))
         if sensors.get("gpu_vram", True) and gpu_vram_used is not None:
             secondary.append((f"{gpu_vram_used / 1024:.1f}GB", (255, 150, 0)))

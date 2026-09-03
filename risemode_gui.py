@@ -127,9 +127,9 @@ class SettingsApp:
         # --- Apply --- (below the preview, not the controls column)
         self.apply_row = ttk.Frame(preview_frame)
         self.apply_row.grid(row=2, column=0, pady=(8, 0))
-        ttk.Button(self.apply_row, text="Apply", command=self._apply).pack(side="left", ipadx=10, ipady=4)
-        self.status = ttk.Label(self.apply_row, text="")
-        self.status.pack(side="left", padx=10)
+        self.apply_button = tk.Button(self.apply_row, text="Apply", command=self._apply)
+        self.apply_button.pack(ipadx=10, ipady=4)
+        self._apply_default_bg = self.apply_button.cget("background")
 
         self._preview_frame = preview_frame
         self._last_pil_img = None
@@ -202,8 +202,13 @@ class SettingsApp:
 
     def _apply(self):
         pr.save_config(self._config_from_widgets())
-        self.status.configure(text="Applied - panel updates within a second")
-        self.root.after(3000, lambda: self.status.configure(text=""))
+        # Flash the button itself green rather than showing a status
+        # message next to it - keeps it perfectly centered under the
+        # preview at all times instead of shifting/reflowing for text.
+        self.apply_button.configure(background="#4caf50", activebackground="#4caf50")
+        self.root.after(600, lambda: self.apply_button.configure(
+            background=self._apply_default_bg, activebackground=self._apply_default_bg,
+        ))
 
     def _on_preview_resize(self):
         # Query actual settled geometry rather than trusting a <Configure>

@@ -12,7 +12,7 @@ This is a generic/commodity HID controller board (unrelated to the well-known "T
 
 ## What it does
 
-Runs as a background service that renders live CPU / RAM / GPU usage, FPS, and a clock directly onto the panel — no Windows, no VM required.
+Runs as a background service that renders live CPU / RAM / GPU usage, FPS, and a clock directly onto the panel — no Windows, no VM required. The panel background is your current desktop wallpaper (auto-detected, center-cropped to the panel's portrait aspect ratio, and dimmed for text legibility).
 
 ## Protocol notes
 
@@ -53,6 +53,11 @@ Brightness control (`LIG` command) exists in the protocol but only produces a br
 
 - (Optional, for GPU stats) `nvidia-smi` on the PATH.
 - (Optional, for the FPS / 1% low panel) [MangoHud](https://github.com/flightlessmango/MangoHud) configured to log continuously. Without it the panel shows `--` for FPS.
+- (Optional, for the background image) GNOME. `load_background()` reads `org.gnome.desktop.background picture-uri`/`picture-uri-dark` via `gsettings`; on any other desktop (or if that returns nothing/a non-`file://` URI, e.g. a solid color) it silently falls back to a plain dark background.
+
+### Background image
+
+The panel background is your desktop wallpaper: read via `gsettings`, center-cropped to the panel's 462x1920 portrait aspect ratio (cropping the long axis rather than stretching/squashing it), scaled down, and blended with black (`BG_DIM_ALPHA`, out of 255, in `risemode_driver.py`) so the stat text stays legible over bright or busy photos. It's decoded once and cached; `load_background()` only re-decodes it if the wallpaper file path or mtime changes (i.e. after you change your wallpaper), not every frame.
 
 ### GPU FPS via MangoHud
 

@@ -29,6 +29,8 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.parse
+import urllib.request
 from collections import deque
 
 import psutil
@@ -173,6 +175,66 @@ FONT_DATE = load_font(54)
 FONT_BIG = load_font(64)
 FONT_MED = load_font(36)
 
+BG_DIM_ALPHA = 140  # 0-255; darkens the wallpaper so stat text stays legible
+                    # over bright/busy photos
+BG_FALLBACK = (15, 15, 25)
+
+
+def get_wallpaper_path():
+    """Reads the current GNOME desktop wallpaper file path via gsettings.
+    Returns None if not on GNOME, nothing is set, or it isn't a local file."""
+    for key in ("picture-uri-dark", "picture-uri"):
+        try:
+            uri = subprocess.check_output(
+                ["gsettings", "get", "org.gnome.desktop.background", key],
+                timeout=1,
+            ).decode().strip().strip("'")
+        except (subprocess.SubprocessError, OSError):
+            return None
+        if not uri:
+            continue
+        parsed = urllib.parse.urlparse(uri)
+        if parsed.scheme == "file":
+            return urllib.request.url2pathname(parsed.path)
+    return None
+
+
+_background_cache = {"path": None, "mtime": None, "image": None}
+
+
+def load_background():
+    """Loads the current desktop wallpaper, center-cropped and scaled to
+    fill the panel (462x1920, portrait) and dimmed so stat text stays
+    readable over it. Cached and only re-decoded if the wallpaper changes.
+    Falls back to a plain dark background if none is set/found/readable."""
+    path = get_wallpaper_path()
+    if path is None or not os.path.isfile(path):
+        return Image.new("RGB", (WIDTH, HEIGHT), BG_FALLBACK)
+
+    mtime = os.path.getmtime(path)
+    if _background_cache["path"] == path and _background_cache["mtime"] == mtime:
+        return _background_cache["image"]
+
+    try:
+        src = Image.open(path).convert("RGB")
+        target_ratio = WIDTH / HEIGHT
+        src_ratio = src.width / src.height
+        if src_ratio > target_ratio:
+            new_width = round(src.height * target_ratio)
+            left = (src.width - new_width) // 2
+            src = src.crop((left, 0, left + new_width, src.height))
+        else:
+            new_height = round(src.width / target_ratio)
+            top = (src.height - new_height) // 2
+            src = src.crop((0, top, src.width, top + new_height))
+        src = src.resize((WIDTH, HEIGHT), Image.LANCZOS)
+        img = Image.blend(src, Image.new("RGB", (WIDTH, HEIGHT), (0, 0, 0)),
+                           BG_DIM_ALPHA / 255)
+    except (OSError, ValueError):
+        img = Image.new("RGB", (WIDTH, HEIGHT), BG_FALLBACK)
+
+    _background_cache.update(path=path, mtime=mtime, image=img)
+    return img
 
 _fps_history = deque(maxlen=200)
 
@@ -190,7 +252,8 @@ def render_stats_image():
             cutoff = max(1, len(sample) // 100)
             fps_low1 = sum(sample[:cutoff]) / cutoff
 
-    img = Image.new("RGB", (WIDTH, HEIGHT), (15, 15, 25))
+    img = load_background().copy()  # copy: we draw on this every frame, the
+                                     # cached original must stay untouched
     draw = ImageDraw.Draw(img)
 
     cpu = psutil.cpu_percent()

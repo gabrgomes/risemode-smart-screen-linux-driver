@@ -269,6 +269,26 @@ def load_background(wallpaper_override=None):
 _fps_history = deque(maxlen=200)
 
 
+def _draw_device_block(draw, y, label, value_text, secondary_parts):
+    """Draws one `LABEL` / big-value block with optional smaller secondary
+    readings (temperature, VRAM, power, ...) packed onto a single line right
+    below it - the shared "device" visual theme CPU and GPU both use.
+    secondary_parts is a list of (text, color) tuples; pass [] for none."""
+    draw.text((20, y), label, font=FONT_MED, fill=(0, 200, 255))
+    y += 44
+    draw.text((20, y), value_text, font=FONT_BIG, fill=(255, 255, 255))
+    if secondary_parts:
+        y += 70
+        x = 20
+        for text, color in secondary_parts:
+            draw.text((x, y), text, font=FONT_MED, fill=color)
+            x += draw.textlength(text, font=FONT_MED) + 24
+        y += 60
+    else:
+        y += 90
+    return y
+
+
 def render_stats_pil(config=None):
     """Renders one frame as an upright (non-rotated) PIL Image. config
     defaults to the saved on-disk config; the GUI passes its own in-memory
@@ -303,42 +323,23 @@ def render_stats_pil(config=None):
 
     y = 40
     if sensors.get("cpu", True):
-        draw.text((20, y), "CPU", font=FONT_MED, fill=(0, 200, 255))
-        y += 44
-        draw.text((20, y), f"{cpu:.0f}%", font=FONT_BIG, fill=(255, 255, 255))
-        y += 90
-
-    if sensors.get("cpu_temp", True) and cpu_temp is not None:
-        draw.text((20, y), "CPU TEMP", font=FONT_MED, fill=(0, 200, 255))
-        y += 44
-        draw.text((20, y), f"{cpu_temp:.0f}C", font=FONT_BIG, fill=(255, 255, 255))
-        y += 90
+        secondary = []
+        if sensors.get("cpu_temp", True) and cpu_temp is not None:
+            secondary.append((f"{cpu_temp:.0f}C", (255, 150, 0)))
+        y = _draw_device_block(draw, y, "CPU", f"{cpu:.0f}%", secondary)
 
     if sensors.get("ram", True):
-        draw.text((20, y), "RAM", font=FONT_MED, fill=(0, 200, 255))
-        y += 44
-        draw.text((20, y), f"{mem:.0f}%", font=FONT_BIG, fill=(255, 255, 255))
-        y += 90
+        y = _draw_device_block(draw, y, "RAM", f"{mem:.0f}%", [])
 
     if sensors.get("gpu", True) and gpu_load is not None:
-        draw.text((20, y), "GPU", font=FONT_MED, fill=(0, 200, 255))
-        y += 44
-        draw.text((20, y), f"{gpu_load:.0f}%", font=FONT_BIG, fill=(255, 255, 255))
-        y += 70
-        draw.text((20, y), f"{gpu_temp:.0f}C", font=FONT_MED, fill=(255, 150, 0))
-        y += 60
-
-    if sensors.get("gpu_vram", True) and gpu_vram_used is not None:
-        draw.text((20, y), "VRAM", font=FONT_MED, fill=(0, 200, 255))
-        y += 44
-        draw.text((20, y), f"{gpu_vram_used / 1024:.1f}GB", font=FONT_BIG, fill=(255, 255, 255))
-        y += 90
-
-    if sensors.get("gpu_power", True) and gpu_power is not None:
-        draw.text((20, y), "GPU POWER", font=FONT_MED, fill=(0, 200, 255))
-        y += 44
-        draw.text((20, y), f"{gpu_power:.0f}W", font=FONT_BIG, fill=(255, 255, 255))
-        y += 90
+        secondary = []
+        if gpu_temp is not None:
+            secondary.append((f"{gpu_temp:.0f}C", (255, 150, 0)))
+        if sensors.get("gpu_vram", True) and gpu_vram_used is not None:
+            secondary.append((f"{gpu_vram_used / 1024:.1f}GB", (255, 150, 0)))
+        if sensors.get("gpu_power", True) and gpu_power is not None:
+            secondary.append((f"{gpu_power:.0f}W", (255, 150, 0)))
+        y = _draw_device_block(draw, y, "GPU", f"{gpu_load:.0f}%", secondary)
 
     if sensors.get("fps", True) or sensors.get("frametime", True):
         y += 30

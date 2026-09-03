@@ -276,11 +276,15 @@ def _compute_auto_colors(bg_img):
        legible text on an arbitrary background - whichever of the two
        extremes has more contrast against the average brightness always
        reads clearly, unlike trying to pick some "just right" mid-tone).
-    2. Label/secondary accent: the background's own average hue rotated
-       to its complementary (opposite the color wheel) - a basic color
-       harmony pick that reliably stands out against the dominant color
-       actually behind it, with saturation/value pushed up so it doesn't
-       just inherit a washed-out, low-contrast tone from the photo.
+    2. Label/secondary accent: a triadic scheme - the background's own
+       average hue plus its two triadic partners, 120 degrees apart
+       around the color wheel. Each accent ends up equally far (120
+       degrees) from the background's hue, for equally strong contrast
+       against it, *and* 120 degrees from each other - evenly spaced is
+       what makes a triadic scheme read as an intentional, harmonious
+       pairing. A small arbitrary hue nudge between the two (tried
+       initially) instead looked like a "near miss" of the same color -
+       dissonant rather than deliberately different.
 
     The separator blends the value color partway into the average
     background tone, keeping it the same subtle, low-key divider the
@@ -293,11 +297,8 @@ def _compute_auto_colors(bg_img):
     value_color = [255, 255, 255] if dark_bg else [20, 20, 20]
 
     h, _s, _v = colorsys.rgb_to_hsv(avg_r / 255, avg_g / 255, avg_b / 255)
-    accent_hue = (h + 0.5) % 1.0
-    label_rgb = colorsys.hsv_to_rgb(accent_hue, 0.75, 1.0 if dark_bg else 0.65)
-    secondary_rgb = colorsys.hsv_to_rgb(
-        (accent_hue + 0.08) % 1.0, 0.85, 0.9 if dark_bg else 0.55
-    )
+    label_rgb = colorsys.hsv_to_rgb((h + 1 / 3) % 1.0, 0.8, 1.0 if dark_bg else 0.65)
+    secondary_rgb = colorsys.hsv_to_rgb((h + 2 / 3) % 1.0, 0.8, 0.85 if dark_bg else 0.55)
 
     separator_color = [
         round(0.35 * v + 0.65 * bg) for v, bg in zip(value_color, (avg_r, avg_g, avg_b))

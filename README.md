@@ -108,7 +108,9 @@ python3 -m venv venv
 ./venv/bin/python3 risemode_gui.py
 ```
 
-Lets you pick a background image (or fall back to the live desktop wallpaper) and toggle which sensors (CPU, RAM, GPU, FPS/1% low, clock) are shown, with a live preview of exactly what the panel would render. **Apply** just writes `~/.config/risemode-screen/config.json` — the running `risemode-screen` service picks it up on its very next frame (`get_config()` in `panel_render.py` is cached by mtime and reloads automatically), no restart needed.
+Lets you pick a background image (or fall back to the live desktop wallpaper), toggle which sensors are shown, and recolor the panel, with a live preview of exactly what the panel would render. **Apply** just writes `~/.config/risemode-screen/config.json` — the running `risemode-screen` service picks it up on its very next frame (`get_config()` in `panel_render.py` is cached by mtime and reloads automatically), no restart needed.
+
+Every sensor block draws through the same 4 color roles (`panel_render.DEFAULT_COLORS`) rather than each having its own: **Labels** (e.g. "CPU", "GPU"), **Values** (the big numbers, and the clock's time), **Secondary readings** (temps, VRAM, power, and the clock's date), and the **Separator line** above the FPS/frame time section. The GUI's Colors section has a swatch button per role that opens the system color picker.
 
 `risemode_driver.py` (the USB protocol/streaming loop) and `risemode_gui.py` (the settings window) both render frames through the shared `panel_render.py`, so the GUI's preview and the panel's actual output are always pixel-for-pixel the same.
 

@@ -50,6 +50,23 @@ SENSOR_LABELS = {
     "clock": "Clock / date",
 }
 
+# The whole panel draws through just 4 color roles - every sensor block
+# uses the same label/value/secondary scheme (e.g. GPU temp, the clock's
+# date) rather than each having its own, so that's the level these are
+# customizable at.
+DEFAULT_COLORS = {
+    "label": [0, 200, 255],      # e.g. "CPU", "GPU", "FPS"
+    "value": [255, 255, 255],    # the big numbers, and the clock's time
+    "secondary": [255, 150, 0],  # temps, VRAM, power, the clock's date
+    "separator": [60, 60, 80],   # the line above the FPS/frame time section
+}
+COLOR_LABELS = {
+    "label": "Labels",
+    "value": "Values",
+    "secondary": "Secondary readings",
+    "separator": "Separator line",
+}
+
 
 def load_config():
     """Reads the GUI-editable config from disk. A missing file, missing
@@ -63,7 +80,9 @@ def load_config():
         data = {}
     sensors = dict(DEFAULT_SENSORS)
     sensors.update(data.get("sensors", {}))
-    return {"wallpaper": data.get("wallpaper"), "sensors": sensors}
+    colors = dict(DEFAULT_COLORS)
+    colors.update(data.get("colors", {}))
+    return {"wallpaper": data.get("wallpaper"), "sensors": sensors, "colors": colors}
 
 
 def save_config(config):
@@ -270,19 +289,21 @@ def load_background(wallpaper_override=None):
 _fps_history = deque(maxlen=200)
 
 
-def _draw_device_block(draw, y, label, value_text, secondary_parts):
+def _draw_device_block(draw, y, label, value_text, secondary_parts, colors):
     """Draws one `LABEL` / big-value block with optional smaller secondary
     readings (temperature, VRAM, power, ...) packed onto a single line right
     below it - the shared "device" visual theme CPU and GPU both use.
-    secondary_parts is a list of (text, color) tuples; pass [] for none."""
-    draw.text((20, y), label, font=FONT_MED, fill=(0, 200, 255))
+    secondary_parts is a list of text strings (colors["secondary"] is used
+    for all of them - callers used to pass a color per part, but every
+    caller always passed the same one anyway); pass [] for none."""
+    draw.text((20, y), label, font=FONT_MED, fill=tuple(colors["label"]))
     y += 44
-    draw.text((20, y), value_text, font=FONT_BIG, fill=(255, 255, 255))
+    draw.text((20, y), value_text, font=FONT_BIG, fill=tuple(colors["value"]))
     if secondary_parts:
         y += 70
         x = 20
-        for text, color in secondary_parts:
-            draw.text((x, y), text, font=FONT_MED, fill=color)
+        for text in secondary_parts:
+            draw.text((x, y), text, font=FONT_MED, fill=tuple(colors["secondary"]))
             x += draw.textlength(text, font=FONT_MED) + 24
         y += 60
     else:
@@ -312,6 +333,12 @@ def render_stats_pil(config=None):
             cutoff = max(1, len(sample) // 100)
             fps_low1 = sum(sample[:cutoff]) / cutoff
 
+    colors = config.get("colors", DEFAULT_COLORS)
+    label_color = tuple(colors["label"])
+    value_color = tuple(colors["value"])
+    secondary_color = tuple(colors["secondary"])
+    separator_color = tuple(colors["separator"])
+
     img = load_background(config.get("wallpaper")).copy()  # copy: caller
                                      # draws on this, cached original must
                                      # stay untouched
@@ -326,49 +353,49 @@ def render_stats_pil(config=None):
     if sensors.get("cpu", True):
         secondary = []
         if sensors.get("cpu_temp", True) and cpu_temp is not None:
-            secondary.append((f"{cpu_temp:.0f}°C", (255, 150, 0)))
-        y = _draw_device_block(draw, y, "CPU", f"{cpu:.0f}%", secondary)
+            secondary.append(f"{cpu_temp:.0f}°C")
+        y = _draw_device_block(draw, y, "CPU", f"{cpu:.0f}%", secondary, colors)
 
     if sensors.get("ram", True):
-        y = _draw_device_block(draw, y, "RAM", f"{mem:.0f}%", [])
+        y = _draw_device_block(draw, y, "RAM", f"{mem:.0f}%", [], colors)
 
     if sensors.get("gpu", True) and gpu_load is not None:
         secondary = []
         if sensors.get("gpu_temp", True) and gpu_temp is not None:
-            secondary.append((f"{gpu_temp:.0f}°C", (255, 150, 0)))
+            secondary.append(f"{gpu_temp:.0f}°C")
         if sensors.get("gpu_vram", True) and gpu_vram_used is not None:
-            secondary.append((f"{gpu_vram_used / 1024:.1f}GB", (255, 150, 0)))
+            secondary.append(f"{gpu_vram_used / 1024:.1f}GB")
         if sensors.get("gpu_power", True) and gpu_power is not None:
-            secondary.append((f"{gpu_power:.0f}W", (255, 150, 0)))
-        y = _draw_device_block(draw, y, "GPU", f"{gpu_load:.0f}%", secondary)
+            secondary.append(f"{gpu_power:.0f}W")
+        y = _draw_device_block(draw, y, "GPU", f"{gpu_load:.0f}%", secondary, colors)
 
     if sensors.get("fps", True) or sensors.get("frametime", True):
         y += 30
-        draw.line([(20, y), (WIDTH - 20, y)], fill=(60, 60, 80), width=2)
+        draw.line([(20, y), (WIDTH - 20, y)], fill=separator_color, width=2)
         y += 30
 
     if sensors.get("fps", True):
-        draw.text((20, y), "FPS", font=FONT_MED, fill=(0, 200, 255))
+        draw.text((20, y), "FPS", font=FONT_MED, fill=label_color)
         y += 44
-        draw.text((20, y), f"{fps:.1f}" if fps is not None else "--", font=FONT_BIG, fill=(255, 255, 255))
+        draw.text((20, y), f"{fps:.1f}" if fps is not None else "--", font=FONT_BIG, fill=value_color)
         y += 90
 
-        draw.text((20, y), "1% LOW", font=FONT_MED, fill=(0, 200, 255))
+        draw.text((20, y), "1% LOW", font=FONT_MED, fill=label_color)
         y += 44
-        draw.text((20, y), f"{fps_low1:.1f}" if fps_low1 is not None else "--", font=FONT_BIG, fill=(255, 255, 255))
+        draw.text((20, y), f"{fps_low1:.1f}" if fps_low1 is not None else "--", font=FONT_BIG, fill=value_color)
         y += 90
 
     if sensors.get("frametime", True):
-        draw.text((20, y), "FRAME TIME", font=FONT_MED, fill=(0, 200, 255))
+        draw.text((20, y), "FRAME TIME", font=FONT_MED, fill=label_color)
         y += 44
-        draw.text((20, y), f"{frametime:.1f}ms" if frametime is not None else "--", font=FONT_BIG, fill=(255, 255, 255))
+        draw.text((20, y), f"{frametime:.1f}ms" if frametime is not None else "--", font=FONT_BIG, fill=value_color)
         y += 90
 
     if sensors.get("clock", True):
         y = HEIGHT - 140
-        draw.text((20, y), time.strftime("%H:%M:%S"), font=FONT_BIG, fill=(255, 255, 255))
+        draw.text((20, y), time.strftime("%H:%M:%S"), font=FONT_BIG, fill=value_color)
         y += 70
-        draw.text((20, y), time.strftime("%d-%m-%Y"), font=FONT_DATE, fill=(255, 150, 0))
+        draw.text((20, y), time.strftime("%d-%m-%Y"), font=FONT_DATE, fill=secondary_color)
 
     return img
 

@@ -11,7 +11,7 @@ mtime and reloads automatically), no restart needed.
 """
 import os
 import tkinter as tk
-from tkinter import filedialog, ttk
+from tkinter import colorchooser, filedialog, ttk
 
 from PIL import ImageTk
 
@@ -92,6 +92,22 @@ class SettingsApp:
             self.sensor_vars[key] = var
             ttk.Checkbutton(sensors_frame, text=label, variable=var).pack(anchor="w", pady=3)
 
+        # --- Colors ---
+        colors_frame = ttk.LabelFrame(controls, text="Colors", padding=12)
+        colors_frame.pack(fill="x", pady=(0, 16))
+
+        self.colors = {k: list(config["colors"][k]) for k in pr.COLOR_LABELS}
+        self.color_buttons = {}
+        for key, label in pr.COLOR_LABELS.items():
+            row = ttk.Frame(colors_frame)
+            row.pack(fill="x", pady=3)
+            ttk.Label(row, text=label, width=17).pack(side="left")
+            btn = tk.Button(row, width=6, relief="solid", borderwidth=1,
+                             command=lambda k=key: self._pick_color(k))
+            btn.pack(side="left")
+            self.color_buttons[key] = btn
+            self._update_color_button(key)
+
         # --- Apply ---
         apply_row = ttk.Frame(controls)
         apply_row.pack(fill="x")
@@ -136,11 +152,29 @@ class SettingsApp:
             self.wp_mode.set("custom")
             self._sync_wp_state()
 
+    @staticmethod
+    def _rgb_to_hex(rgb):
+        return "#%02x%02x%02x" % tuple(rgb)
+
+    def _update_color_button(self, key):
+        hexcolor = self._rgb_to_hex(self.colors[key])
+        self.color_buttons[key].configure(bg=hexcolor, activebackground=hexcolor)
+
+    def _pick_color(self, key):
+        rgb, _hexcolor = colorchooser.askcolor(
+            color=self._rgb_to_hex(self.colors[key]),
+            title=f"Choose {pr.COLOR_LABELS[key]} color",
+        )
+        if rgb is not None:
+            self.colors[key] = [round(c) for c in rgb]
+            self._update_color_button(key)
+
     def _config_from_widgets(self):
         wallpaper = self.wp_path.get().strip() if self.wp_mode.get() == "custom" else None
         return {
             "wallpaper": wallpaper or None,
             "sensors": {k: v.get() for k, v in self.sensor_vars.items()},
+            "colors": {k: list(v) for k, v in self.colors.items()},
         }
 
     def _apply(self):

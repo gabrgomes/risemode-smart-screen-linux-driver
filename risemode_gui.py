@@ -16,27 +16,42 @@ from PIL import ImageTk
 
 import panel_render as pr
 
-PREVIEW_HEIGHT = 700
+PREVIEW_HEIGHT = 900  # initial size; the preview pane resizes with the window
 PREVIEW_WIDTH = round(pr.WIDTH * PREVIEW_HEIGHT / pr.HEIGHT)
 PREVIEW_REFRESH_MS = 1000
+BASE_FONT_SIZE = 13
+FRAME_PADDING = 18
 
 
 class SettingsApp:
     def __init__(self, root):
         self.root = root
         root.title("Risemode Smart Screen Settings")
-        root.resizable(False, False)
+        root.geometry("1150x900")
+
+        style = ttk.Style()
+        default_font = ("TkDefaultFont", BASE_FONT_SIZE)
+        style.configure(".", font=default_font)
+        style.configure("TLabelframe.Label", font=("TkDefaultFont", BASE_FONT_SIZE, "bold"))
+        style.configure("Heading.TLabel", font=("TkDefaultFont", BASE_FONT_SIZE, "bold"))
+
+        root.columnconfigure(0, weight=0)
+        root.columnconfigure(1, weight=1)
+        root.rowconfigure(0, weight=1)
 
         config = pr.get_config()
 
-        controls = ttk.Frame(root, padding=12)
+        controls = ttk.Frame(root, padding=18)
         controls.grid(row=0, column=0, sticky="n")
-        preview_frame = ttk.Frame(root, padding=12)
-        preview_frame.grid(row=0, column=1, sticky="n")
+
+        preview_frame = ttk.Frame(root, padding=FRAME_PADDING)
+        preview_frame.grid(row=0, column=1, sticky="nsew")
+        preview_frame.columnconfigure(0, weight=1)
+        preview_frame.rowconfigure(1, weight=1)
 
         # --- Background ---
-        wp_frame = ttk.LabelFrame(controls, text="Background", padding=8)
-        wp_frame.pack(fill="x", pady=(0, 12))
+        wp_frame = ttk.LabelFrame(controls, text="Background", padding=12)
+        wp_frame.pack(fill="x", pady=(0, 16))
 
         self.wp_mode = tk.StringVar(
             value="custom" if config["wallpaper"] else "desktop"
@@ -46,41 +61,56 @@ class SettingsApp:
         ttk.Radiobutton(
             wp_frame, text="Desktop wallpaper (auto-updates)",
             variable=self.wp_mode, value="desktop", command=self._sync_wp_state,
-        ).pack(anchor="w")
+        ).pack(anchor="w", pady=3)
 
         custom_row = ttk.Frame(wp_frame)
-        custom_row.pack(fill="x", pady=(4, 0))
+        custom_row.pack(fill="x", pady=(6, 0))
         ttk.Radiobutton(
             custom_row, text="Custom image:", variable=self.wp_mode,
             value="custom", command=self._sync_wp_state,
         ).pack(side="left")
-        self.wp_entry = ttk.Entry(custom_row, textvariable=self.wp_path, width=26)
-        self.wp_entry.pack(side="left", padx=4, fill="x", expand=True)
+        self.wp_entry = ttk.Entry(custom_row, textvariable=self.wp_path, width=28)
+        self.wp_entry.pack(side="left", padx=6, fill="x", expand=True)
         self.wp_browse = ttk.Button(custom_row, text="Browse...", command=self._browse)
         self.wp_browse.pack(side="left")
         self._sync_wp_state()
 
         # --- Sensors ---
-        sensors_frame = ttk.LabelFrame(controls, text="Sensors", padding=8)
-        sensors_frame.pack(fill="x", pady=(0, 12))
+        sensors_frame = ttk.LabelFrame(controls, text="Sensors", padding=12)
+        sensors_frame.pack(fill="x", pady=(0, 16))
 
         self.sensor_vars = {}
         for key, label in pr.SENSOR_LABELS.items():
             var = tk.BooleanVar(value=config["sensors"].get(key, True))
             self.sensor_vars[key] = var
-            ttk.Checkbutton(sensors_frame, text=label, variable=var).pack(anchor="w")
+            ttk.Checkbutton(sensors_frame, text=label, variable=var).pack(anchor="w", pady=3)
 
         # --- Apply ---
         apply_row = ttk.Frame(controls)
         apply_row.pack(fill="x")
-        ttk.Button(apply_row, text="Apply", command=self._apply).pack(side="left")
+        ttk.Button(apply_row, text="Apply", command=self._apply).pack(side="left", ipadx=10, ipady=4)
         self.status = ttk.Label(apply_row, text="")
-        self.status.pack(side="left", padx=8)
+        self.status.pack(side="left", padx=10)
 
         # --- Preview ---
-        ttk.Label(preview_frame, text="Live preview").pack()
-        self.preview_label = ttk.Label(preview_frame)
-        self.preview_label.pack()
+        self.preview_heading = ttk.Label(preview_frame, text="Live preview", style="Heading.TLabel")
+        self.preview_heading.grid(row=0, column=0, pady=(0, 8))
+        self.preview_label = ttk.Label(preview_frame, anchor="center")
+        self.preview_label.grid(row=1, column=0, sticky="nsew")
+
+        self._preview_frame = preview_frame
+        self._last_pil_img = None
+        self._preview_size = (PREVIEW_WIDTH, PREVIEW_HEIGHT)
+        preview_frame.bind("<Configure>", lambda event: self._on_preview_resize())
+
+        # The controls column doesn't stretch (weight=0), so it can force
+        # the preview column to zero width unless minsize reserves it a
+        # usable amount up front - compute this from the controls' actual
+        # rendered width rather than guessing a fixed number.
+        root.update_idletasks()
+        min_w = controls.winfo_reqwidth() + 260
+        min_h = max(controls.winfo_reqheight() + 2 * FRAME_PADDING, 560)
+        root.minsize(min_w, min_h)
 
         self._tick_preview()
 
@@ -111,13 +141,39 @@ class SettingsApp:
         self.status.configure(text="Applied - panel updates within a second")
         self.root.after(3000, lambda: self.status.configure(text=""))
 
-    def _tick_preview(self):
-        img = pr.render_stats_pil(self._config_from_widgets())
-        img = img.resize((PREVIEW_WIDTH, PREVIEW_HEIGHT))
-        self._preview_photo = ImageTk.PhotoImage(img)  # keep a reference -
-                                                        # tkinter drops the
-                                                        # image otherwise
+    def _on_preview_resize(self):
+        # Query actual settled geometry rather than trusting a <Configure>
+        # event's payload, which can lag one resize behind mid-drag.
+        self.root.update_idletasks()
+        # winfo_width/height on a padded ttk.Frame includes its own padding,
+        # which is otherwise unavailable to its children - subtract it back
+        # out along with the heading label's own height.
+        avail_w = max(self._preview_frame.winfo_width() - 2 * FRAME_PADDING, 50)
+        heading_h = self.preview_heading.winfo_reqheight() + 8
+        avail_h = max(
+            self._preview_frame.winfo_height() - 2 * FRAME_PADDING - heading_h, 50
+        )
+
+        # Fit the panel's fixed 462x1920 aspect ratio into the available
+        # space, whichever axis is the tighter constraint.
+        ratio = pr.WIDTH / pr.HEIGHT
+        w, h = avail_w, round(avail_w / ratio)
+        if h > avail_h:
+            h, w = avail_h, round(avail_h * ratio)
+        self._preview_size = (max(w, 40), max(h, 40))
+        if self._last_pil_img is not None:
+            self._show_preview(self._last_pil_img)
+
+    def _show_preview(self, img):
+        resized = img.resize(self._preview_size)
+        self._preview_photo = ImageTk.PhotoImage(resized)  # keep a reference -
+                                                            # tkinter drops the
+                                                            # image otherwise
         self.preview_label.configure(image=self._preview_photo)
+
+    def _tick_preview(self):
+        self._last_pil_img = pr.render_stats_pil(self._config_from_widgets())
+        self._on_preview_resize()  # also re-fits size in case it drifted
         self.root.after(PREVIEW_REFRESH_MS, self._tick_preview)
 
 

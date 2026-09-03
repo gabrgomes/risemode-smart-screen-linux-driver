@@ -12,7 +12,7 @@ This is a generic/commodity HID controller board (unrelated to the well-known "T
 
 ## What it does
 
-Runs as a background service that renders live CPU / RAM / GPU usage, FPS, and a clock directly onto the panel — no Windows, no VM required. The panel background is your current desktop wallpaper (auto-detected, center-cropped to the panel's portrait aspect ratio, and dimmed for text legibility).
+Runs as a background service that renders live CPU / RAM / GPU usage, FPS, and a clock directly onto the panel — no Windows, no VM required. The panel background defaults to your current desktop wallpaper (auto-detected, center-cropped to the panel's portrait aspect ratio, and dimmed for text legibility). A settings GUI (`risemode_gui.py`) lets you pick a different background image and toggle sensors on/off, with a live preview, and applies instantly to the running service — see [Settings GUI](#settings-gui).
 
 ## Protocol notes
 
@@ -53,15 +53,16 @@ Brightness control (`LIG` command) exists in the protocol but only produces a br
 
 - (Optional, for GPU stats) `nvidia-smi` on the PATH.
 - (Optional, for the FPS / 1% low panel) [MangoHud](https://github.com/flightlessmango/MangoHud) configured to log continuously. Without it the panel shows `--` for FPS.
-- (Optional, for the background image) GNOME. `load_background()` reads `org.gnome.desktop.background picture-uri`/`picture-uri-dark` via `gsettings`; on any other desktop (or if that returns nothing/a non-`file://` URI, e.g. a solid color) it silently falls back to a plain dark background.
+- (Optional, for the background image) GNOME. `get_wallpaper_path()` reads `org.gnome.desktop.background picture-uri`/`picture-uri-dark` via `gsettings`; on any other desktop (or if that returns nothing/a non-`file://` URI, e.g. a solid color) it silently falls back to a plain dark background unless you've set a custom image (see below).
+- (Optional, for the settings GUI) Tkinter (`python3-tk`) — usually preinstalled alongside `python3` on Debian/Ubuntu; if `risemode_gui.py` fails with `ModuleNotFoundError: tkinter`, `sudo apt install python3-tk`.
 
 ### Background image
 
-The panel background is your desktop wallpaper: read via `gsettings`, center-cropped to the panel's 462x1920 portrait aspect ratio (cropping the long axis rather than stretching/squashing it), scaled down, and blended with black (`BG_DIM_ALPHA`, out of 255, in `risemode_driver.py`) so the stat text stays legible over bright or busy photos. It's decoded once and cached; `load_background()` only re-decodes it if the wallpaper file path or mtime changes (i.e. after you change your wallpaper), not every frame.
+By default the panel background is your desktop wallpaper: read via `gsettings`, center-cropped to the panel's 462x1920 portrait aspect ratio (cropping the long axis rather than stretching/squashing it), scaled down, and blended with black (`BG_DIM_ALPHA`, out of 255, in `panel_render.py`) so the stat text stays legible over bright or busy photos. The [settings GUI](#settings-gui) can override it with any image file instead. It's decoded once and cached; `load_background()` only re-decodes it if the effective path or its mtime changes, not every frame.
 
 ### GPU FPS via MangoHud
 
-The FPS shown on the panel is the *real* frame rate of whatever game/GL app is currently running, read from MangoHud's own CSV logging — not the driver's own frame-send rate. `get_gpu_fps()` in the driver tails the newest non-summary CSV in `~/.local/share/mangohud_logs`.
+The FPS shown on the panel is the *real* frame rate of whatever game/GL app is currently running, read from MangoHud's own CSV logging — not the driver's own frame-send rate. `get_gpu_fps()` in `panel_render.py` tails the newest non-summary CSV in `~/.local/share/mangohud_logs`.
 
 ```
 sudo apt install mangohud
@@ -91,6 +92,16 @@ python3 -m venv venv
 ./venv/bin/pip install -r requirements.txt
 ./venv/bin/python3 risemode_driver.py
 ```
+
+## Settings GUI
+
+```bash
+./venv/bin/python3 risemode_gui.py
+```
+
+Lets you pick a background image (or fall back to the live desktop wallpaper) and toggle which sensors (CPU, RAM, GPU, FPS/1% low, clock) are shown, with a live preview of exactly what the panel would render. **Apply** just writes `~/.config/risemode-screen/config.json` — the running `risemode-screen` service picks it up on its very next frame (`get_config()` in `panel_render.py` is cached by mtime and reloads automatically), no restart needed.
+
+`risemode_driver.py` (the USB protocol/streaming loop) and `risemode_gui.py` (the settings window) both render frames through the shared `panel_render.py`, so the GUI's preview and the panel's actual output are always pixel-for-pixel the same.
 
 ## Running as a systemd user service
 

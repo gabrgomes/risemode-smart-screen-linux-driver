@@ -128,7 +128,7 @@ class SettingsApp:
         self.apply_row = ttk.Frame(preview_frame)
         self.apply_row.grid(row=2, column=0, pady=(8, 0))
         self.apply_button = tk.Button(self.apply_row, text="Apply", command=self._apply)
-        self.apply_button.pack(ipadx=10, ipady=4)
+        self.apply_button.pack(ipadx=10, ipady=9)  # matches wp_browse's height
         self._apply_default_bg = self.apply_button.cget("background")
 
         self._preview_frame = preview_frame

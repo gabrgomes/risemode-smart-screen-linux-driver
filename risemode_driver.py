@@ -35,7 +35,7 @@ VENDOR_ID = 0x2100
 PRODUCT_ID = 0x0003
 EP_OUT = 0x01
 PACKET_SIZE = 1024
-CONNECT_INTERVAL_S = 5
+CONNECT_INTERVAL_S = 10
 SESSION_MAX_S = 5  # proactively reconnect periodically; this firmware
                       # occasionally wedges itself after a while and only a
                       # fresh USB reset (done in find_device()) clears it

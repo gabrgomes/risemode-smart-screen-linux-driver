@@ -115,6 +115,7 @@ Exec=$SCRIPT_DIR/venv/bin/python3 $SCRIPT_DIR/risemode_gui.py
 Icon=$SCRIPT_DIR/icon.png
 Terminal=false
 Categories=Settings;HardwareSettings;
+StartupWMClass=risemode-settings
 EOF
 update-desktop-database "$APPS_DIR" >/dev/null 2>&1 || true
 echo "Added \"Risemode Smart Screen Settings\" to your application menu."

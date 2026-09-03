@@ -9,6 +9,7 @@ Apply just writes panel_render.CONFIG_PATH - the running risemode-screen
 service picks it up on its very next frame (get_config() is cached by
 mtime and reloads automatically), no restart needed.
 """
+import os
 import tkinter as tk
 from tkinter import filedialog, ttk
 
@@ -21,6 +22,12 @@ PREVIEW_WIDTH = round(pr.WIDTH * PREVIEW_HEIGHT / pr.HEIGHT)
 PREVIEW_REFRESH_MS = 1000
 BASE_FONT_SIZE = 13
 FRAME_PADDING = 18
+
+# Matches install.sh's StartupWMClass= so a dock/taskbar can associate the
+# running window with the .desktop entry (and its icon) instead of falling
+# back to a generic one.
+WM_CLASS = "risemode-settings"
+ICON_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icon.png")
 
 
 class SettingsApp:
@@ -178,7 +185,12 @@ class SettingsApp:
 
 
 def main():
-    root = tk.Tk()
+    root = tk.Tk(className=WM_CLASS)
+    try:
+        icon = tk.PhotoImage(file=ICON_PATH)
+        root.iconphoto(True, icon)
+    except tk.TclError:
+        pass  # icon.png missing/unreadable - not fatal, just no window icon
     SettingsApp(root)
     root.mainloop()
 

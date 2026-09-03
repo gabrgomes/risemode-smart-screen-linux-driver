@@ -12,7 +12,7 @@ This is a generic/commodity HID controller board (unrelated to the well-known "T
 
 ## What it does
 
-Runs as a background service that renders live CPU / RAM / GPU usage, FPS, and a clock directly onto the panel — no Windows, no VM required. The panel background defaults to your current desktop wallpaper (auto-detected, center-cropped to the panel's portrait aspect ratio, and dimmed for text legibility). A settings GUI (`risemode_gui.py`) lets you pick a different background image and toggle sensors on/off, with a live preview, and applies instantly to the running service — see [Settings GUI](#settings-gui).
+Runs as a background service that renders live system and game-performance stats directly onto the panel — no Windows, no VM required. Available sensors: CPU usage, CPU temperature, RAM usage, GPU usage/temperature, GPU VRAM usage, GPU power draw, FPS/1% low, frame time, and a clock. The panel background defaults to your current desktop wallpaper (auto-detected, center-cropped to the panel's portrait aspect ratio, and dimmed for text legibility). A settings GUI (`risemode_gui.py`) lets you pick a different background image and toggle sensors on/off, with a live preview, and applies instantly to the running service — see [Settings GUI](#settings-gui).
 
 ## Protocol notes
 
@@ -51,8 +51,9 @@ Brightness control (`LIG` command) exists in the protocol but only produces a br
 
   Reload with `sudo udevadm control --reload-rules && sudo udevadm trigger`, and make sure your user is in the `plugdev` group.
 
-- (Optional, for GPU stats) `nvidia-smi` on the PATH.
-- (Optional, for the FPS / 1% low panel) [MangoHud](https://github.com/flightlessmango/MangoHud) configured to log continuously. Without it the panel shows `--` for FPS.
+- (Optional, for GPU usage/temp/VRAM/power) `nvidia-smi` on the PATH — NVIDIA only. Without it these sensors just don't draw (rather than showing a placeholder), same as the panel skipping the whole GPU section today when no GPU is found.
+- (Optional, for CPU temperature) an `lm-sensors`-visible CPU chip (`k10temp` on AMD, `coretemp` on Intel) — install/configure `lm-sensors` if `psutil.sensors_temperatures()` comes back empty. Falls back to whatever sensor chip is first available if neither is found.
+- (Optional, for FPS / 1% low / frame time) [MangoHud](https://github.com/flightlessmango/MangoHud) configured to log continuously. Without it these show `--`.
 - (Optional, for the background image) GNOME. `get_wallpaper_path()` reads `org.gnome.desktop.background picture-uri`/`picture-uri-dark` via `gsettings`; on any other desktop (or if that returns nothing/a non-`file://` URI, e.g. a solid color) it silently falls back to a plain dark background unless you've set a custom image (see below).
 - (Optional, for the settings GUI) Tkinter (`python3-tk`) — usually preinstalled alongside `python3` on Debian/Ubuntu; if `risemode_gui.py` fails with `ModuleNotFoundError: tkinter`, `sudo apt install python3-tk`.
 
@@ -62,7 +63,7 @@ By default the panel background is your desktop wallpaper: read via `gsettings`,
 
 ### GPU FPS via MangoHud
 
-The FPS shown on the panel is the *real* frame rate of whatever game/GL app is currently running, read from MangoHud's own CSV logging — not the driver's own frame-send rate. `get_gpu_fps()` in `panel_render.py` tails the newest non-summary CSV in `~/.local/share/mangohud_logs`.
+The FPS/1% low/frame time shown on the panel are the *real*, live values for whatever game/GL app is currently running, read from MangoHud's own CSV logging — not the driver's own frame-send rate. `get_game_stats()` in `panel_render.py` tails the newest non-summary CSV in `~/.local/share/mangohud_logs` and parses the whole latest row (keyed by MangoHud's own column names, whose order isn't hardcoded since it depends on MangoHud's config/version) rather than just pulling out FPS, so any other column MangoHud logs (`cpu_load`, `gpu_vram_used`, `swap_used`, ...) is available the same way if you want to wire up more sensors later.
 
 ```
 sudo apt install mangohud

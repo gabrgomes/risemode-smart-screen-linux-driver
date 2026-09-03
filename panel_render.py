@@ -31,12 +31,21 @@ BG_DIM_ALPHA = 140  # 0-255; darkens the wallpaper so stat text stays legible
 BG_FALLBACK = (15, 15, 25)
 
 CONFIG_PATH = os.path.expanduser("~/.config/risemode-screen/config.json")
-DEFAULT_SENSORS = {"cpu": True, "ram": True, "gpu": True, "fps": True, "clock": True}
+DEFAULT_SENSORS = {
+    "cpu": True, "cpu_temp": True, "ram": True,
+    "gpu": True, "gpu_vram": True, "gpu_power": True,
+    "fps": True, "frametime": True,
+    "clock": True,
+}
 SENSOR_LABELS = {
     "cpu": "CPU usage",
+    "cpu_temp": "CPU temperature",
     "ram": "RAM usage",
     "gpu": "GPU usage / temp",
+    "gpu_vram": "GPU VRAM usage",
+    "gpu_power": "GPU power draw",
     "fps": "FPS / 1% low",
+    "frametime": "Frame time (stutter)",
     "clock": "Clock / date",
 }
 
@@ -82,31 +91,84 @@ def get_config():
 
 
 def get_gpu_stats():
+    """Returns (load%, temp_c, vram_used_mb, vram_total_mb, power_w), all
+    None if nvidia-smi isn't available - these are always-on system stats
+    (like CPU/RAM), not tied to any particular game being logged."""
     try:
         out = subprocess.check_output(
-            ["nvidia-smi", "--query-gpu=utilization.gpu,temperature.gpu",
+            ["nvidia-smi",
+             "--query-gpu=utilization.gpu,temperature.gpu,memory.used,"
+             "memory.total,power.draw",
              "--format=csv,noheader,nounits"],
             timeout=1,
         ).decode().strip()
-        load, temp = out.split(",")
-        return float(load), float(temp)
+        load, temp, vram_used, vram_total, power = out.split(",")
+        return float(load), float(temp), float(vram_used), float(vram_total), float(power)
     except (subprocess.SubprocessError, OSError, ValueError):
-        return None, None
+        return None, None, None, None, None
 
 
-def get_gpu_fps():
-    """Reads the live FPS of whatever game/GL app MangoHud is currently
-    logging (see README for setup). Returns None if nothing is running."""
+def get_cpu_temp():
+    """Best-effort CPU package temperature via psutil/lm-sensors. Chip
+    names vary by vendor/kernel (k10temp on AMD, coretemp on Intel) - prefer
+    those, otherwise fall back to whatever's first available."""
+    try:
+        temps = psutil.sensors_temperatures()
+    except (AttributeError, OSError):
+        return None
+    for chip in ("k10temp", "coretemp"):
+        entries = temps.get(chip)
+        if entries:
+            for e in entries:
+                if e.label in ("Tctl", "Package id 0"):
+                    return e.current
+            return entries[0].current
+    for entries in temps.values():
+        if entries:
+            return entries[0].current
+    return None
+
+
+_mangohud_columns_cache = {"path": None, "columns": None}
+
+
+def _mangohud_columns(path):
+    """MangoHud's CSV opens with a 2-line system-info block, then a header
+    row naming the actual per-frame columns - their order depends on
+    MangoHud's config/version, so it can't be hardcoded. Cached per log
+    file to avoid re-reading it every frame."""
+    if _mangohud_columns_cache["path"] == path:
+        return _mangohud_columns_cache["columns"]
+    try:
+        with open(path, errors="ignore") as f:
+            f.readline()  # system-info header (os,cpu,gpu,ram,...)
+            f.readline()  # system-info values
+            columns = f.readline().strip().split(",")
+    except OSError:
+        columns = None
+    _mangohud_columns_cache.update(path=path, columns=columns)
+    return columns
+
+
+def get_game_stats():
+    """Reads the latest per-frame row MangoHud logged for whatever game/GL
+    app is currently running (see README for setup), keyed by MangoHud's
+    own column names - fps, frametime, gpu_vram_used, cpu_temp, and
+    whatever else the current config logs. Empty dict if nothing is
+    currently logging."""
     try:
         logs = [
             p for p in glob.glob(os.path.join(MANGOHUD_LOG_DIR, "*.csv"))
             if not p.endswith("_summary.csv")
         ]
         if not logs:
-            return None
+            return {}
         latest = max(logs, key=os.path.getmtime)
         if time.time() - os.path.getmtime(latest) > MANGOHUD_STALE_S:
-            return None
+            return {}
+        columns = _mangohud_columns(latest)
+        if not columns:
+            return {}
         with open(latest, "rb") as f:
             f.seek(0, os.SEEK_END)
             size = f.tell()
@@ -114,10 +176,16 @@ def get_gpu_fps():
             lines = f.read().decode(errors="ignore").splitlines()
         for line in reversed(lines):
             if line and line[0].isdigit():
-                return float(line.split(",")[0])
-        return None
+                stats = {}
+                for name, value in zip(columns, line.split(",")):
+                    try:
+                        stats[name] = float(value)
+                    except ValueError:
+                        pass
+                return stats
+        return {}
     except (OSError, ValueError):
-        return None
+        return {}
 
 
 def load_font(size):
@@ -209,7 +277,9 @@ def render_stats_pil(config=None):
         config = get_config()
     sensors = config.get("sensors", DEFAULT_SENSORS)
 
-    fps = get_gpu_fps()
+    game_stats = get_game_stats()
+    fps = game_stats.get("fps")
+    frametime = game_stats.get("frametime")
     if fps is None:
         _fps_history.clear()
         fps_low1 = None
@@ -228,13 +298,20 @@ def render_stats_pil(config=None):
 
     cpu = psutil.cpu_percent()
     mem = psutil.virtual_memory().percent
-    gpu_load, gpu_temp = get_gpu_stats()
+    cpu_temp = get_cpu_temp()
+    gpu_load, gpu_temp, gpu_vram_used, gpu_vram_total, gpu_power = get_gpu_stats()
 
     y = 40
     if sensors.get("cpu", True):
         draw.text((20, y), "CPU", font=FONT_MED, fill=(0, 200, 255))
         y += 44
         draw.text((20, y), f"{cpu:.0f}%", font=FONT_BIG, fill=(255, 255, 255))
+        y += 90
+
+    if sensors.get("cpu_temp", True) and cpu_temp is not None:
+        draw.text((20, y), "CPU TEMP", font=FONT_MED, fill=(0, 200, 255))
+        y += 44
+        draw.text((20, y), f"{cpu_temp:.0f}C", font=FONT_BIG, fill=(255, 255, 255))
         y += 90
 
     if sensors.get("ram", True):
@@ -251,11 +328,24 @@ def render_stats_pil(config=None):
         draw.text((20, y), f"{gpu_temp:.0f}C", font=FONT_MED, fill=(255, 150, 0))
         y += 60
 
-    if sensors.get("fps", True):
+    if sensors.get("gpu_vram", True) and gpu_vram_used is not None:
+        draw.text((20, y), "VRAM", font=FONT_MED, fill=(0, 200, 255))
+        y += 44
+        draw.text((20, y), f"{gpu_vram_used / 1024:.1f}GB", font=FONT_BIG, fill=(255, 255, 255))
+        y += 90
+
+    if sensors.get("gpu_power", True) and gpu_power is not None:
+        draw.text((20, y), "GPU POWER", font=FONT_MED, fill=(0, 200, 255))
+        y += 44
+        draw.text((20, y), f"{gpu_power:.0f}W", font=FONT_BIG, fill=(255, 255, 255))
+        y += 90
+
+    if sensors.get("fps", True) or sensors.get("frametime", True):
         y += 30
         draw.line([(20, y), (WIDTH - 20, y)], fill=(60, 60, 80), width=2)
         y += 30
 
+    if sensors.get("fps", True):
         draw.text((20, y), "FPS", font=FONT_MED, fill=(0, 200, 255))
         y += 44
         draw.text((20, y), f"{fps:.1f}" if fps is not None else "--", font=FONT_BIG, fill=(255, 255, 255))
@@ -264,6 +354,12 @@ def render_stats_pil(config=None):
         draw.text((20, y), "1% LOW", font=FONT_MED, fill=(0, 200, 255))
         y += 44
         draw.text((20, y), f"{fps_low1:.1f}" if fps_low1 is not None else "--", font=FONT_BIG, fill=(255, 255, 255))
+        y += 90
+
+    if sensors.get("frametime", True):
+        draw.text((20, y), "FRAME TIME", font=FONT_MED, fill=(0, 200, 255))
+        y += 44
+        draw.text((20, y), f"{frametime:.1f}ms" if frametime is not None else "--", font=FONT_BIG, fill=(255, 255, 255))
         y += 90
 
     if sensors.get("clock", True):

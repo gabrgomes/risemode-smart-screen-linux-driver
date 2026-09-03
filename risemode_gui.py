@@ -34,7 +34,7 @@ class SettingsApp:
     def __init__(self, root):
         self.root = root
         root.title("Risemode Smart Screen Settings")
-        root.geometry("1150x900")
+        root.geometry("1300x900")
 
         style = ttk.Style()
         default_font = ("TkDefaultFont", BASE_FONT_SIZE)
@@ -50,6 +50,7 @@ class SettingsApp:
 
         controls = ttk.Frame(root, padding=18)
         controls.grid(row=0, column=0, sticky="n")
+        self.controls = controls
 
         preview_frame = ttk.Frame(root, padding=FRAME_PADDING)
         preview_frame.grid(row=0, column=1, sticky="nsew")
@@ -140,7 +141,7 @@ class SettingsApp:
         # usable amount up front - compute this from the controls' actual
         # rendered width rather than guessing a fixed number.
         root.update_idletasks()
-        min_w = controls.winfo_reqwidth() + 260
+        min_w = controls.winfo_reqwidth() + 380
         min_h = max(controls.winfo_reqheight() + 2 * FRAME_PADDING, 560)
         root.minsize(min_w, min_h)
 
@@ -217,8 +218,12 @@ class SettingsApp:
         avail_w = max(self._preview_frame.winfo_width() - 2 * FRAME_PADDING, 50)
         heading_h = self.preview_heading.winfo_reqheight() + 8
         apply_h = self.apply_row.winfo_reqheight() + 8
+        # Cap to the controls column's own height (rather than
+        # preview_frame's, which stretches to fill the whole window) so
+        # the image+apply block ends at the same height as the controls -
+        # lining up the Apply button with the bottom of the left panel.
         avail_h = max(
-            self._preview_frame.winfo_height() - 2 * FRAME_PADDING - heading_h - apply_h, 50
+            self.controls.winfo_height() - 2 * FRAME_PADDING - heading_h - apply_h, 50
         )
 
         # Fit the panel's fixed 462x1920 aspect ratio into the available

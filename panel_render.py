@@ -268,6 +268,29 @@ def _relative_luminance(rgb):
     return 0.2126 * r + 0.7152 * g + 0.0722 * b
 
 
+def _color_at_luminance(hue, max_sat, target_luminance):
+    """Finds an RGB at the given hue whose perceived luminance lands close
+    to target_luminance, searching both value and saturation (up to
+    max_sat). A saturated hue alone often can't reach a given target - a
+    pure, fully-saturated red only reaches ~0.21 luminance even at HSV
+    V=1.0 (red gets a small weight in perceived brightness - see
+    _relative_luminance), so pushing V without also being willing to
+    desaturate would silently fail to actually get any lighter, e.g.
+    trying to make a light accent out of an already-vivid red background.
+    Desaturating toward white/black is what actually moves luminance the
+    rest of the way once the hue's own headroom runs out."""
+    best_rgb, best_diff = None, None
+    for i in range(13):
+        v = i / 12
+        for sat_frac in (1.0, 0.7, 0.4, 0.15, 0.0):
+            r, g, b = colorsys.hsv_to_rgb(hue, max_sat * sat_frac, v)
+            rgb = (r * 255, g * 255, b * 255)
+            diff = abs(_relative_luminance(rgb) - target_luminance)
+            if best_diff is None or diff < best_diff:
+                best_diff, best_rgb = diff, rgb
+    return [round(c) for c in best_rgb]
+
+
 def _compute_auto_colors(bg_img):
     """Derives a color scheme from the background image, in two parts:
 
@@ -276,15 +299,18 @@ def _compute_auto_colors(bg_img):
        legible text on an arbitrary background - whichever of the two
        extremes has more contrast against the average brightness always
        reads clearly, unlike trying to pick some "just right" mid-tone).
-    2. Label/secondary accent: a triadic scheme - the background's own
-       average hue plus its two triadic partners, 120 degrees apart
-       around the color wheel. Each accent ends up equally far (120
-       degrees) from the background's hue, for equally strong contrast
-       against it, *and* 120 degrees from each other - evenly spaced is
-       what makes a triadic scheme read as an intentional, harmonious
-       pairing. A small arbitrary hue nudge between the two (tried
-       initially) instead looked like a "near miss" of the same color -
-       dissonant rather than deliberately different.
+    2. Label/secondary accent: the background's *own* average hue, not a
+       rotated one - rotating away from it (complementary or triadic, both
+       tried first) got contrast by picking a hue foreign to the photo,
+       which read as random and clashing rather than belonging to it.
+       Keeping the same hue makes the accent read as "a vivid shade of
+       this photo's own color" instead. Contrast comes from targeting an
+       actual perceived-luminance gap against the background via
+       _color_at_luminance() (see there for why raw HSV brightness alone
+       isn't enough), light against a dark background or dark against a
+       light one. Label and secondary target different luminance gaps of
+       that *same* hue rather than different hues, so they stay visually
+       related to each other and to the photo.
 
     The separator blends the value color partway into the average
     background tone, keeping it the same subtle, low-key divider the
@@ -296,18 +322,19 @@ def _compute_auto_colors(bg_img):
 
     value_color = [255, 255, 255] if dark_bg else [20, 20, 20]
 
-    h, _s, _v = colorsys.rgb_to_hsv(avg_r / 255, avg_g / 255, avg_b / 255)
-    label_rgb = colorsys.hsv_to_rgb((h + 1 / 3) % 1.0, 0.8, 1.0 if dark_bg else 0.65)
-    secondary_rgb = colorsys.hsv_to_rgb((h + 2 / 3) % 1.0, 0.8, 0.85 if dark_bg else 0.55)
+    h, s, _v = colorsys.rgb_to_hsv(avg_r / 255, avg_g / 255, avg_b / 255)
+    accent_sat = max(s, 0.6)
+    label_rgb = _color_at_luminance(h, accent_sat, 0.88 if dark_bg else 0.12)
+    secondary_rgb = _color_at_luminance(h, accent_sat, 0.68 if dark_bg else 0.28)
 
     separator_color = [
         round(0.35 * v + 0.65 * bg) for v, bg in zip(value_color, (avg_r, avg_g, avg_b))
     ]
 
     return {
-        "label": [round(c * 255) for c in label_rgb],
+        "label": label_rgb,
         "value": value_color,
-        "secondary": [round(c * 255) for c in secondary_rgb],
+        "secondary": secondary_rgb,
         "separator": separator_color,
     }
 

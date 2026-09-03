@@ -35,11 +35,13 @@ VENDOR_ID = 0x2100
 PRODUCT_ID = 0x0003
 EP_OUT = 0x01
 PACKET_SIZE = 1024
-CONNECT_INTERVAL_S = 8
+CONNECT_INTERVAL_S = 5
 SESSION_MAX_S = 5  # proactively reconnect periodically; this firmware
                       # occasionally wedges itself after a while and only a
                       # fresh USB reset (done in find_device()) clears it
-FRAME_INTERVAL_S = 0.3
+FRAME_INTERVAL_S = 0.15  # was doubled to 0.3 in cf43246 purely for lower
+                          # USB/CPU load, not for stability - lowered back
+                          # here for a more responsive panel
 
 CONNECT_PACKET = bytes.fromhex("4352540000434f4e4e454354") + b"\x00" * (
     PACKET_SIZE - 12

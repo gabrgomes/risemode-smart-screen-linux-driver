@@ -61,13 +61,12 @@ class SettingsApp:
         wp_frame = ttk.LabelFrame(controls, text="Background", padding=12)
         wp_frame.pack(fill="x", pady=(0, 16))
 
-        self.wp_mode = tk.StringVar(
-            value="custom" if config["wallpaper"] else "desktop"
-        )
+        self.wp_mode = tk.StringVar(value=config["background_mode"])
         self.wp_path = tk.StringVar(value=config["wallpaper"] or "")
+        self.game_api_key = tk.StringVar(value=config.get("steamgriddb_api_key", ""))
 
         ttk.Radiobutton(
-            wp_frame, text="Desktop wallpaper (auto-updates)",
+            wp_frame, text=pr.BACKGROUND_MODE_LABELS["desktop"],
             variable=self.wp_mode, value="desktop", command=self._sync_wp_state,
         ).pack(anchor="w", pady=3)
 
@@ -81,6 +80,28 @@ class SettingsApp:
         self.wp_entry.pack(side="left", padx=6, fill="x", expand=True)
         self.wp_browse = ttk.Button(custom_row, text="Browse...", command=self._browse)
         self.wp_browse.pack(side="left")
+
+        ttk.Radiobutton(
+            wp_frame, text=pr.BACKGROUND_MODE_LABELS["game"],
+            variable=self.wp_mode, value="game", command=self._sync_wp_state,
+        ).pack(anchor="w", pady=(10, 3))
+
+        game_key_row = ttk.Frame(wp_frame)
+        game_key_row.pack(fill="x", padx=(20, 0))
+        ttk.Label(game_key_row, text="SteamGridDB API key:").pack(side="left")
+        self.game_key_entry = ttk.Entry(
+            game_key_row, textvariable=self.game_api_key, width=22, show="*"
+        )
+        self.game_key_entry.pack(side="left", padx=6, fill="x", expand=True)
+        ttk.Label(
+            wp_frame, text="Get a free key at steamgriddb.com/profile/preferences",
+            foreground="#888888", padding=(20, 0, 0, 0),
+        ).pack(anchor="w")
+        self.game_status_label = ttk.Label(
+            wp_frame, text="", foreground="#888888", padding=(20, 4, 0, 0),
+        )
+        self.game_status_label.pack(anchor="w")
+
         self._sync_wp_state()
 
         # --- Sensors ---
@@ -150,9 +171,13 @@ class SettingsApp:
         self._tick_preview()
 
     def _sync_wp_state(self):
-        state = "normal" if self.wp_mode.get() == "custom" else "disabled"
-        self.wp_entry.configure(state=state)
-        self.wp_browse.configure(state=state)
+        mode = self.wp_mode.get()
+        custom_state = "normal" if mode == "custom" else "disabled"
+        self.wp_entry.configure(state=custom_state)
+        self.wp_browse.configure(state=custom_state)
+        self.game_key_entry.configure(state="normal" if mode == "game" else "disabled")
+        if mode != "game":
+            self.game_status_label.configure(text="")
 
     def _browse(self):
         path = filedialog.askopenfilename(
@@ -194,9 +219,12 @@ class SettingsApp:
             self._set_color_button(key, self.colors[key])
 
     def _config_from_widgets(self):
-        wallpaper = self.wp_path.get().strip() if self.wp_mode.get() == "custom" else None
+        mode = self.wp_mode.get()
+        wallpaper = self.wp_path.get().strip() if mode == "custom" else None
         return {
             "wallpaper": wallpaper or None,
+            "background_mode": mode,
+            "steamgriddb_api_key": self.game_api_key.get().strip(),
             "sensors": {k: v.get() for k, v in self.sensor_vars.items()},
             "colors": {k: list(v) for k, v in self.colors.items()},
             "color_mode": self.color_mode.get(),
@@ -253,10 +281,20 @@ class SettingsApp:
         config = self._config_from_widgets()
         self._last_pil_img = pr.render_stats_pil(config)
         self._on_preview_resize()  # also re-fits size in case it drifted
+        bg_path = pr.resolve_background_path(config)
         if self.color_mode.get() == "auto":
-            auto_colors = pr.get_auto_colors(config["wallpaper"])
+            auto_colors = pr.get_auto_colors(bg_path)
             for key, rgb in auto_colors.items():
                 self._set_color_button(key, rgb)
+        if self.wp_mode.get() == "game":
+            if bg_path:
+                self.game_status_label.configure(
+                    text=f"Game detected - showing poster ({os.path.basename(bg_path)})"
+                )
+            else:
+                self.game_status_label.configure(
+                    text="No game detected - showing desktop wallpaper"
+                )
         self.root.after(PREVIEW_REFRESH_MS, self._tick_preview)
 
 

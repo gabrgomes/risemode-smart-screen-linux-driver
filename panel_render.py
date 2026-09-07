@@ -14,6 +14,7 @@ import json
 import os
 import subprocess
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from collections import deque
@@ -31,7 +32,19 @@ BG_DIM_ALPHA = 140  # 0-255; darkens the wallpaper so stat text stays legible
                     # over bright/busy photos
 BG_FALLBACK = (15, 15, 25)
 
+STEAMGRIDDB_API_BASE = "https://www.steamgriddb.com/api/v2"
+POSTER_CACHE_DIR = os.path.expanduser("~/.cache/risemode-screen/posters")
+GAME_DETECT_INTERVAL_S = 5  # how often to re-scan for a running Steam game -
+                            # doesn't need checking every frame like the
+                            # panel's own render loop
+
 CONFIG_PATH = os.path.expanduser("~/.config/risemode-screen/config.json")
+BACKGROUND_MODES = ("desktop", "custom", "game")
+BACKGROUND_MODE_LABELS = {
+    "desktop": "Desktop wallpaper (auto-updates)",
+    "custom": "Custom image",
+    "game": "Game Mode (auto poster from SteamGridDB)",
+}
 DEFAULT_SENSORS = {
     "cpu": True, "cpu_temp": True, "ram": True,
     "gpu": True, "gpu_temp": True, "gpu_vram": True, "gpu_power": True,
@@ -92,8 +105,17 @@ def load_config():
     color_mode = data.get("color_mode", "custom")
     if color_mode not in COLOR_MODES:
         color_mode = "custom"
+    # Configs saved before Game Mode existed have no background_mode at all -
+    # infer it from wallpaper instead of silently discarding a custom image.
+    background_mode = data.get(
+        "background_mode", "custom" if data.get("wallpaper") else "desktop"
+    )
+    if background_mode not in BACKGROUND_MODES:
+        background_mode = "desktop"
     return {
         "wallpaper": data.get("wallpaper"),
+        "background_mode": background_mode,
+        "steamgriddb_api_key": data.get("steamgriddb_api_key", ""),
         "sensors": sensors,
         "colors": colors,
         "color_mode": color_mode,
@@ -255,6 +277,131 @@ def get_wallpaper_path():
         parsed = urllib.parse.urlparse(uri)
         if parsed.scheme == "file":
             return urllib.request.url2pathname(parsed.path)
+    return None
+
+
+def _detect_running_game_appid():
+    """Best-effort detection of a currently-running Steam game, via the
+    SteamAppId environment variable Steam sets on every game process it
+    launches - this hands us the game's Steam AppID directly (which is
+    exactly what SteamGridDB's API keys off), with no need to guess it from
+    a process/window name. Only catches games actually launched through
+    Steam (including Proton); returns None otherwise, or if nothing is
+    currently running."""
+    try:
+        for proc in psutil.process_iter():
+            try:
+                appid = proc.environ().get("SteamAppId")
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, OSError):
+                continue
+            if appid and appid.isdigit():
+                return appid
+    except OSError:
+        pass
+    return None
+
+
+_game_appid_cache = {"time": 0.0, "appid": None}
+
+
+def get_running_game_appid():
+    """Cached, throttled wrapper around _detect_running_game_appid() -
+    scanning every running process's environ is too heavy to redo every
+    single frame like the rest of the panel's stats."""
+    now = time.time()
+    if now - _game_appid_cache["time"] > GAME_DETECT_INTERVAL_S:
+        _game_appid_cache["appid"] = _detect_running_game_appid()
+        _game_appid_cache["time"] = now
+    return _game_appid_cache["appid"]
+
+
+POSTER_FETCH_RETRY_S = 30  # cooldown before retrying a failed fetch (bad/
+                           # missing key, no poster, offline, ...) - without
+                           # this, "game" mode's per-second preview refresh
+                           # would hammer the API every tick while a game is
+                           # running and the fetch keeps failing
+
+_poster_fetch_failures = {}  # appid -> time of last failed attempt
+
+
+def _fetch_game_poster_path(appid, api_key):
+    """Returns a local file path to the given Steam appid's top-voted
+    SteamGridDB poster (a portrait "grid" image), downloading and caching it
+    to disk on first use - posters don't change, so every later call for the
+    same game is just a cache hit, not a repeat API/network round-trip.
+    Returns None on any failure (no API key configured, no network, no
+    poster available for this game, ...) so callers can fall back cleanly to
+    the desktop wallpaper instead."""
+    os.makedirs(POSTER_CACHE_DIR, exist_ok=True)
+    for ext in ("png", "jpg", "jpeg", "webp"):
+        cached = os.path.join(POSTER_CACHE_DIR, f"{appid}.{ext}")
+        if os.path.isfile(cached):
+            return cached
+    if not api_key:
+        return None
+    last_failure = _poster_fetch_failures.get(appid)
+    if last_failure is not None and time.time() - last_failure < POSTER_FETCH_RETRY_S:
+        return None
+
+    def _fail():
+        _poster_fetch_failures[appid] = time.time()
+        return None
+
+    url = f"{STEAMGRIDDB_API_BASE}/grids/steam/{appid}?dimensions=600x900&types=static"
+    request = urllib.request.Request(url, headers={"Authorization": f"Bearer {api_key}"})
+    try:
+        with urllib.request.urlopen(request, timeout=4) as resp:
+            payload = json.loads(resp.read().decode())
+    except (urllib.error.URLError, OSError, ValueError):
+        return _fail()
+
+    grids = payload.get("data") or []
+    if not grids:
+        return _fail()
+    best = max(grids, key=lambda g: g.get("score", 0))  # most-voted poster
+    image_url = best.get("url")
+    if not image_url:
+        return _fail()
+
+    ext = image_url.rsplit(".", 1)[-1].split("?")[0].lower()
+    if ext not in ("png", "jpg", "jpeg", "webp"):
+        ext = "png"
+    dest = os.path.join(POSTER_CACHE_DIR, f"{appid}.{ext}")
+    try:
+        with urllib.request.urlopen(image_url, timeout=6) as resp:
+            image_bytes = resp.read()
+        with open(dest, "wb") as f:
+            f.write(image_bytes)
+    except (urllib.error.URLError, OSError):
+        return _fail()
+    return dest
+
+
+def resolve_background_path(config):
+    """Figures out which image path load_background() should actually
+    display for the config's background_mode:
+      - "custom" uses the saved wallpaper path as-is.
+      - "game" swaps in the currently-running game's poster when one is
+        detected and fetchable, and falls straight through to None (which
+        load_background() turns into the live desktop wallpaper) the moment
+        no game is running or no poster could be fetched - so it always
+        shows *something* current rather than a stale poster from a game
+        that has since closed.
+      - "desktop" (or anything unset) also returns None, i.e. always follow
+        the live wallpaper.
+    """
+    mode = config.get(
+        "background_mode", "custom" if config.get("wallpaper") else "desktop"
+    )
+    if mode == "custom":
+        return config.get("wallpaper")
+    if mode == "game":
+        appid = get_running_game_appid()
+        if appid:
+            poster = _fetch_game_poster_path(appid, config.get("steamgriddb_api_key", ""))
+            if poster:
+                return poster
+        return None
     return None
 
 
@@ -447,8 +594,10 @@ def render_stats_pil(config=None):
             cutoff = max(1, len(sample) // 100)
             fps_low1 = sum(sample[:cutoff]) / cutoff
 
+    bg_path = resolve_background_path(config)
+
     if config.get("color_mode", "custom") == "auto":
-        colors = get_auto_colors(config.get("wallpaper"))
+        colors = get_auto_colors(bg_path)
     else:
         colors = config.get("colors", DEFAULT_COLORS)
     label_color = tuple(colors["label"])
@@ -456,7 +605,7 @@ def render_stats_pil(config=None):
     secondary_color = tuple(colors["secondary"])
     separator_color = tuple(colors["separator"])
 
-    img = load_background(config.get("wallpaper")).copy()  # copy: caller
+    img = load_background(bg_path).copy()  # copy: caller
                                      # draws on this, cached original must
                                      # stay untouched
     draw = ImageDraw.Draw(img)

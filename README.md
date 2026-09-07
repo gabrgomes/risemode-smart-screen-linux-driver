@@ -61,6 +61,15 @@ Brightness control (`LIG` command) exists in the protocol but only produces a br
 
 By default the panel background is your desktop wallpaper: read via `gsettings`, center-cropped to the panel's 462x1920 portrait aspect ratio (cropping the long axis rather than stretching/squashing it), scaled down, and blended with black (`BG_DIM_ALPHA`, out of 255, in `panel_render.py`) so the stat text stays legible over bright or busy photos. The [settings GUI](#settings-gui) can override it with any image file instead. It's decoded once and cached; `load_background()` only re-decodes it if the effective path or its mtime changes, not every frame.
 
+#### Game Mode
+
+A third background option: while a Steam game is running, the panel shows that game's top-voted poster (a portrait "grid" image) from [SteamGridDB](https://www.steamgriddb.com/) instead, and switches back to the desktop wallpaper automatically the moment the game closes.
+
+- Requires a free SteamGridDB API key ([steamgriddb.com/profile/preferences](https://www.steamgriddb.com/profile/preferences)), entered in the settings GUI once Game Mode is selected.
+- Detection is via the `SteamAppId` environment variable Steam sets on every game process it launches (`get_running_game_appid()` in `panel_render.py`, throttled to a re-scan every `GAME_DETECT_INTERVAL_S`, currently 5s) — this only catches games actually launched through Steam (including Proton), not non-Steam executables.
+- Posters are downloaded once per game and cached to `~/.cache/risemode-screen/posters/`, so switching between already-played games is instant and doesn't re-hit the API. A failed fetch (bad/missing key, no poster for that game, offline) is cached too, for `POSTER_FETCH_RETRY_S` (30s), so a persistent failure doesn't get retried every frame.
+- If no game is currently running (or no poster could be fetched), the panel just shows the desktop wallpaper, same as if Game Mode weren't selected — so it never gets stuck on a stale poster.
+
 ### GPU FPS via MangoHud
 
 The FPS/1% low/frame time shown on the panel are the *real*, live values for whatever game/GL app is currently running, read from MangoHud's own CSV logging — not the driver's own frame-send rate. `get_game_stats()` in `panel_render.py` tails the newest non-summary CSV in `~/.local/share/mangohud_logs` and parses the whole latest row (keyed by MangoHud's own column names, whose order isn't hardcoded since it depends on MangoHud's config/version) rather than just pulling out FPS, so any other column MangoHud logs (`cpu_load`, `gpu_vram_used`, `swap_used`, ...) is available the same way if you want to wire up more sensors later.
@@ -108,7 +117,7 @@ python3 -m venv venv
 ./venv/bin/python3 risemode_gui.py
 ```
 
-Lets you pick a background image (or fall back to the live desktop wallpaper), toggle which sensors are shown, and recolor the panel, with a live preview of exactly what the panel would render. **Apply** just writes `~/.config/risemode-screen/config.json` — the running `risemode-screen` service picks it up on its very next frame (`get_config()` in `panel_render.py` is cached by mtime and reloads automatically), no restart needed.
+Lets you pick a background image (the live desktop wallpaper, a custom file, or [Game Mode](#game-mode)'s auto-poster), toggle which sensors are shown, and recolor the panel, with a live preview of exactly what the panel would render. **Apply** just writes `~/.config/risemode-screen/config.json` — the running `risemode-screen` service picks it up on its very next frame (`get_config()` in `panel_render.py` is cached by mtime and reloads automatically), no restart needed.
 
 Every sensor block draws through the same 4 color roles (`panel_render.DEFAULT_COLORS`) rather than each having its own: **Labels** (e.g. "CPU", "GPU"), **Values** (the big numbers, and the clock's time), **Secondary readings** (temps, VRAM, power, and the clock's date), and the **Separator line** above the FPS/frame time section. Two color modes, picked with a radio button in the GUI's Colors section:
 

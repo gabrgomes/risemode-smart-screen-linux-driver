@@ -361,7 +361,15 @@ def _fetch_game_poster_path(appid, api_key):
         return None
 
     url = f"{STEAMGRIDDB_API_BASE}/grids/steam/{appid}?dimensions=600x900&types=static"
-    request = urllib.request.Request(url, headers={"Authorization": f"Bearer {api_key}"})
+    request = urllib.request.Request(url, headers={
+        "Authorization": f"Bearer {api_key}",
+        # Without a real User-Agent, urllib's default ("Python-urllib/x.y")
+        # gets blocked outright by SteamGridDB's Cloudflare WAF - a 403
+        # with Cloudflare error 1010 ("browser/client denied"), not an auth
+        # or rate-limit problem at all, before the request even reaches
+        # their API.
+        "User-Agent": "risemode-smart-screen-driver/1.0",
+    })
     try:
         with urllib.request.urlopen(request, timeout=4) as resp:
             payload = json.loads(resp.read().decode())
@@ -380,8 +388,11 @@ def _fetch_game_poster_path(appid, api_key):
     if ext not in ("png", "jpg", "jpeg", "webp"):
         ext = "png"
     dest = os.path.join(POSTER_CACHE_DIR, f"{appid}.{ext}")
+    image_request = urllib.request.Request(
+        image_url, headers={"User-Agent": "risemode-smart-screen-driver/1.0"}
+    )
     try:
-        with urllib.request.urlopen(image_url, timeout=6) as resp:
+        with urllib.request.urlopen(image_request, timeout=6) as resp:
             image_bytes = resp.read()
         with open(dest, "wb") as f:
             f.write(image_bytes)

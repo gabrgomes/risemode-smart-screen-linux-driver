@@ -63,6 +63,7 @@ class SettingsApp:
 
         self.wp_mode = tk.StringVar(value=config["background_mode"])
         self.wp_path = tk.StringVar(value=config["wallpaper"] or "")
+        self.game_mode_enabled = tk.BooleanVar(value=config.get("game_mode_enabled", False))
         self.game_api_key = tk.StringVar(value=config.get("steamgriddb_api_key", ""))
 
         ttk.Radiobutton(
@@ -81,9 +82,13 @@ class SettingsApp:
         self.wp_browse = ttk.Button(custom_row, text="Browse...", command=self._browse)
         self.wp_browse.pack(side="left")
 
-        ttk.Radiobutton(
-            wp_frame, text=pr.BACKGROUND_MODE_LABELS["game"],
-            variable=self.wp_mode, value="game", command=self._sync_wp_state,
+        # Game Mode is independent of the desktop/custom choice above - it
+        # overlays a poster on top of whichever of those is picked, only
+        # while a game is actually running - so it's a checkbox, not a
+        # third mutually-exclusive radio option.
+        ttk.Checkbutton(
+            wp_frame, text=pr.GAME_MODE_LABEL,
+            variable=self.game_mode_enabled, command=self._sync_wp_state,
         ).pack(anchor="w", pady=(10, 3))
 
         game_key_row = ttk.Frame(wp_frame)
@@ -171,12 +176,12 @@ class SettingsApp:
         self._tick_preview()
 
     def _sync_wp_state(self):
-        mode = self.wp_mode.get()
-        custom_state = "normal" if mode == "custom" else "disabled"
+        custom_state = "normal" if self.wp_mode.get() == "custom" else "disabled"
         self.wp_entry.configure(state=custom_state)
         self.wp_browse.configure(state=custom_state)
-        self.game_key_entry.configure(state="normal" if mode == "game" else "disabled")
-        if mode != "game":
+        game_state = "normal" if self.game_mode_enabled.get() else "disabled"
+        self.game_key_entry.configure(state=game_state)
+        if not self.game_mode_enabled.get():
             self.game_status_label.configure(text="")
 
     def _browse(self):
@@ -224,6 +229,7 @@ class SettingsApp:
         return {
             "wallpaper": wallpaper or None,
             "background_mode": mode,
+            "game_mode_enabled": self.game_mode_enabled.get(),
             "steamgriddb_api_key": self.game_api_key.get().strip(),
             "sensors": {k: v.get() for k, v in self.sensor_vars.items()},
             "colors": {k: list(v) for k, v in self.colors.items()},
@@ -286,14 +292,16 @@ class SettingsApp:
             auto_colors = pr.get_auto_colors(bg_path)
             for key, rgb in auto_colors.items():
                 self._set_color_button(key, rgb)
-        if self.wp_mode.get() == "game":
-            if bg_path:
+        if self.game_mode_enabled.get():
+            appid = pr.get_running_game_appid()
+            if appid and bg_path and os.path.dirname(bg_path) == pr.POSTER_CACHE_DIR:
                 self.game_status_label.configure(
-                    text=f"Game detected - showing poster ({os.path.basename(bg_path)})"
+                    text=f"Game detected (AppID {appid}) - showing its poster"
                 )
             else:
+                fallback = "custom image" if self.wp_mode.get() == "custom" else "desktop wallpaper"
                 self.game_status_label.configure(
-                    text="No game detected - showing desktop wallpaper"
+                    text=f"No game detected - showing {fallback}"
                 )
         self.root.after(PREVIEW_REFRESH_MS, self._tick_preview)
 

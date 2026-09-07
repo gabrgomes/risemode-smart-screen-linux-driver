@@ -39,12 +39,16 @@ GAME_DETECT_INTERVAL_S = 5  # how often to re-scan for a running Steam game -
                             # panel's own render loop
 
 CONFIG_PATH = os.path.expanduser("~/.config/risemode-screen/config.json")
-BACKGROUND_MODES = ("desktop", "custom", "game")
+# The base background is always one of these two - Game Mode isn't a third
+# alternative to them, it's an independent overlay (see GAME_MODE_LABEL)
+# that swaps in a poster on top of whichever of these is picked, only while
+# a game is actually running.
+BACKGROUND_MODES = ("desktop", "custom")
 BACKGROUND_MODE_LABELS = {
     "desktop": "Desktop wallpaper (auto-updates)",
     "custom": "Custom image",
-    "game": "Game Mode (auto poster from SteamGridDB)",
 }
+GAME_MODE_LABEL = "Game Mode: show the running game's poster instead"
 DEFAULT_SENSORS = {
     "cpu": True, "cpu_temp": True, "ram": True,
     "gpu": True, "gpu_temp": True, "gpu_vram": True, "gpu_power": True,
@@ -110,11 +114,20 @@ def load_config():
     background_mode = data.get(
         "background_mode", "custom" if data.get("wallpaper") else "desktop"
     )
+    game_mode_enabled = bool(data.get("game_mode_enabled", False))
+    if background_mode == "game":
+        # Migrates configs from when Game Mode was its own third radio
+        # option instead of an overlay on top of desktop/custom - falls
+        # back to whichever of those the wallpaper implies, same as a
+        # config with no background_mode at all.
+        background_mode = "custom" if data.get("wallpaper") else "desktop"
+        game_mode_enabled = True
     if background_mode not in BACKGROUND_MODES:
         background_mode = "desktop"
     return {
         "wallpaper": data.get("wallpaper"),
         "background_mode": background_mode,
+        "game_mode_enabled": game_mode_enabled,
         "steamgriddb_api_key": data.get("steamgriddb_api_key", ""),
         "sensors": sensors,
         "colors": colors,
@@ -379,30 +392,32 @@ def _fetch_game_poster_path(appid, api_key):
 
 def resolve_background_path(config):
     """Figures out which image path load_background() should actually
-    display for the config's background_mode:
+    display. Starts from the base background_mode:
       - "custom" uses the saved wallpaper path as-is.
-      - "game" swaps in the currently-running game's poster when one is
-        detected and fetchable, and falls straight through to None (which
-        load_background() turns into the live desktop wallpaper) the moment
-        no game is running or no poster could be fetched - so it always
-        shows *something* current rather than a stale poster from a game
-        that has since closed.
-      - "desktop" (or anything unset) also returns None, i.e. always follow
-        the live wallpaper.
+      - "desktop" (or anything unset) returns None, i.e. always follow the
+        live wallpaper.
+
+    Game Mode (game_mode_enabled) isn't a third alternative to those - it's
+    an overlay on top of whichever base is picked, swapping in the
+    currently-running game's poster only while a game is actually detected
+    and a poster for it is fetchable. The instant no game is running (or no
+    poster could be fetched), this falls straight back through to the base
+    path above - so it's never stuck showing a stale poster from a game
+    that has since closed.
     """
     mode = config.get(
         "background_mode", "custom" if config.get("wallpaper") else "desktop"
     )
-    if mode == "custom":
-        return config.get("wallpaper")
-    if mode == "game":
+    base_path = config.get("wallpaper") if mode == "custom" else None
+
+    if config.get("game_mode_enabled"):
         appid = get_running_game_appid()
         if appid:
             poster = _fetch_game_poster_path(appid, config.get("steamgriddb_api_key", ""))
             if poster:
                 return poster
-        return None
-    return None
+
+    return base_path
 
 
 def _relative_luminance(rgb):

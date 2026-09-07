@@ -33,7 +33,9 @@ BG_DIM_ALPHA = 140  # 0-255; darkens the wallpaper so stat text stays legible
 BG_FALLBACK = (15, 15, 25)
 
 STEAMGRIDDB_API_BASE = "https://www.steamgriddb.com/api/v2"
-POSTER_CACHE_DIR = os.path.expanduser("~/.cache/risemode-screen/posters")
+HERO_CACHE_DIR = os.path.expanduser("~/.cache/risemode-screen/heroes")
+HERO_4K_WIDTH = 3840  # SteamGridDB's "4K" hero dimension is 3840x1240,
+                      # vs. 1920x620 for the standard size
 GAME_DETECT_INTERVAL_S = 5  # how often to re-scan for a running Steam game -
                             # doesn't need checking every frame like the
                             # panel's own render loop
@@ -41,14 +43,14 @@ GAME_DETECT_INTERVAL_S = 5  # how often to re-scan for a running Steam game -
 CONFIG_PATH = os.path.expanduser("~/.config/risemode-screen/config.json")
 # The base background is always one of these two - Game Mode isn't a third
 # alternative to them, it's an independent overlay (see GAME_MODE_LABEL)
-# that swaps in a poster on top of whichever of these is picked, only while
+# that swaps in a hero image on top of whichever of these is picked, only while
 # a game is actually running.
 BACKGROUND_MODES = ("desktop", "custom")
 BACKGROUND_MODE_LABELS = {
     "desktop": "Desktop wallpaper (auto-updates)",
     "custom": "Custom image",
 }
-GAME_MODE_LABEL = "Game Mode: show the running game's poster instead"
+GAME_MODE_LABEL = "Game Mode: show the running game's hero art instead"
 DEFAULT_SENSORS = {
     "cpu": True, "cpu_temp": True, "ram": True,
     "gpu": True, "gpu_temp": True, "gpu_vram": True, "gpu_power": True,
@@ -328,47 +330,49 @@ def get_running_game_appid():
     return _game_appid_cache["appid"]
 
 
-POSTER_FETCH_RETRY_S = 30  # cooldown before retrying a failed fetch (bad/
-                           # missing key, no poster, offline, ...) - without
-                           # this, "game" mode's per-second preview refresh
-                           # would hammer the API every tick while a game is
-                           # running and the fetch keeps failing
+HERO_FETCH_RETRY_S = 30  # cooldown before retrying a failed fetch (bad/
+                         # missing key, no hero image, offline, ...) -
+                         # without this, "game" mode's per-second preview
+                         # refresh would hammer the API every tick while a
+                         # game is running and the fetch keeps failing
 
-_poster_fetch_failures = {}  # appid -> time of last failed attempt
+_hero_fetch_failures = {}  # appid -> time of last failed attempt
+
+_USER_AGENT = "risemode-smart-screen-driver/1.0"
+# Without a real User-Agent, urllib's default ("Python-urllib/x.y") gets
+# blocked outright by SteamGridDB's Cloudflare WAF - a 403 with Cloudflare
+# error 1010 ("browser/client denied"), not an auth or rate-limit problem
+# at all, before the request even reaches their API or CDN.
 
 
-def _fetch_game_poster_path(appid, api_key):
-    """Returns a local file path to the given Steam appid's top-voted
-    SteamGridDB poster (a portrait "grid" image), downloading and caching it
-    to disk on first use - posters don't change, so every later call for the
-    same game is just a cache hit, not a repeat API/network round-trip.
-    Returns None on any failure (no API key configured, no network, no
-    poster available for this game, ...) so callers can fall back cleanly to
-    the desktop wallpaper instead."""
-    os.makedirs(POSTER_CACHE_DIR, exist_ok=True)
+def _fetch_game_hero_path(appid, api_key):
+    """Returns a local file path to the given Steam appid's best-rated hero
+    image (SteamGridDB's wide background art, preferring their 4K/3840x1240
+    size over the standard 1920x620 one when available), downloading and
+    caching it to disk on first use - hero art doesn't change, so every
+    later call for the same game is just a cache hit, not a repeat
+    API/network round-trip. Returns None on any failure (no API key
+    configured, no network, no hero art available for this game, ...) so
+    callers can fall back cleanly to the base background instead."""
+    os.makedirs(HERO_CACHE_DIR, exist_ok=True)
     for ext in ("png", "jpg", "jpeg", "webp"):
-        cached = os.path.join(POSTER_CACHE_DIR, f"{appid}.{ext}")
+        cached = os.path.join(HERO_CACHE_DIR, f"{appid}.{ext}")
         if os.path.isfile(cached):
             return cached
     if not api_key:
         return None
-    last_failure = _poster_fetch_failures.get(appid)
-    if last_failure is not None and time.time() - last_failure < POSTER_FETCH_RETRY_S:
+    last_failure = _hero_fetch_failures.get(appid)
+    if last_failure is not None and time.time() - last_failure < HERO_FETCH_RETRY_S:
         return None
 
     def _fail():
-        _poster_fetch_failures[appid] = time.time()
+        _hero_fetch_failures[appid] = time.time()
         return None
 
-    url = f"{STEAMGRIDDB_API_BASE}/grids/steam/{appid}?dimensions=600x900&types=static"
+    url = f"{STEAMGRIDDB_API_BASE}/heroes/steam/{appid}?types=static"
     request = urllib.request.Request(url, headers={
         "Authorization": f"Bearer {api_key}",
-        # Without a real User-Agent, urllib's default ("Python-urllib/x.y")
-        # gets blocked outright by SteamGridDB's Cloudflare WAF - a 403
-        # with Cloudflare error 1010 ("browser/client denied"), not an auth
-        # or rate-limit problem at all, before the request even reaches
-        # their API.
-        "User-Agent": "risemode-smart-screen-driver/1.0",
+        "User-Agent": _USER_AGENT,
     })
     try:
         with urllib.request.urlopen(request, timeout=4) as resp:
@@ -376,10 +380,18 @@ def _fetch_game_poster_path(appid, api_key):
     except (urllib.error.URLError, OSError, ValueError):
         return _fail()
 
-    grids = payload.get("data") or []
-    if not grids:
+    heroes = payload.get("data") or []
+    if not heroes:
         return _fail()
-    best = max(grids, key=lambda g: g.get("score", 0))  # most-voted poster
+    # Prefer 4K art over the standard size regardless of score - only
+    # breaking ties by score (most-voted) within whichever size tier is
+    # actually available, since most entries carry a score of 0 anyway
+    # (SteamGridDB's voting is sparse) and a 4K image is the more
+    # meaningful "best" here.
+    best = max(
+        heroes,
+        key=lambda h: (h.get("width", 0) >= HERO_4K_WIDTH, h.get("score", 0)),
+    )
     image_url = best.get("url")
     if not image_url:
         return _fail()
@@ -387,10 +399,8 @@ def _fetch_game_poster_path(appid, api_key):
     ext = image_url.rsplit(".", 1)[-1].split("?")[0].lower()
     if ext not in ("png", "jpg", "jpeg", "webp"):
         ext = "png"
-    dest = os.path.join(POSTER_CACHE_DIR, f"{appid}.{ext}")
-    image_request = urllib.request.Request(
-        image_url, headers={"User-Agent": "risemode-smart-screen-driver/1.0"}
-    )
+    dest = os.path.join(HERO_CACHE_DIR, f"{appid}.{ext}")
+    image_request = urllib.request.Request(image_url, headers={"User-Agent": _USER_AGENT})
     try:
         with urllib.request.urlopen(image_request, timeout=6) as resp:
             image_bytes = resp.read()
@@ -410,11 +420,11 @@ def resolve_background_path(config):
 
     Game Mode (game_mode_enabled) isn't a third alternative to those - it's
     an overlay on top of whichever base is picked, swapping in the
-    currently-running game's poster only while a game is actually detected
-    and a poster for it is fetchable. The instant no game is running (or no
-    poster could be fetched), this falls straight back through to the base
-    path above - so it's never stuck showing a stale poster from a game
-    that has since closed.
+    currently-running game's hero art only while a game is actually
+    detected and hero art for it is fetchable. The instant no game is
+    running (or no hero art could be fetched), this falls straight back
+    through to the base path above - so it's never stuck showing stale art
+    from a game that has since closed.
     """
     mode = config.get(
         "background_mode", "custom" if config.get("wallpaper") else "desktop"
@@ -424,9 +434,9 @@ def resolve_background_path(config):
     if config.get("game_mode_enabled"):
         appid = get_running_game_appid()
         if appid:
-            poster = _fetch_game_poster_path(appid, config.get("steamgriddb_api_key", ""))
-            if poster:
-                return poster
+            hero_path = _fetch_game_hero_path(appid, config.get("steamgriddb_api_key", ""))
+            if hero_path:
+                return hero_path
 
     return base_path
 

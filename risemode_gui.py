@@ -262,7 +262,8 @@ class SettingsApp:
         otherwise be squeezed into a tall, narrow leftover strip next to
         controls instead of the wide one it actually needs."""
         self.root.update_idletasks()
-        if self.orientation.get() == "horizontal":
+        horizontal = self.orientation.get() == "horizontal"
+        if horizontal:
             self.controls.grid(row=0, column=0, sticky="nw")
             self._preview_frame.grid(row=1, column=0, sticky="nsew")
             self.root.columnconfigure(0, weight=1)
@@ -284,6 +285,20 @@ class SettingsApp:
             min_w = self.controls.winfo_reqwidth() + 380
             min_h = max(self.controls.winfo_reqheight() + 2 * FRAME_PADDING, 560)
         self.root.minsize(min_w, min_h)
+
+        # minsize only ever grows an existing window, it never shrinks one -
+        # so coming from vertical's wide side-by-side layout, horizontal's
+        # single narrower column would otherwise leave whatever width the
+        # window already had just sitting empty to the right of it (exactly
+        # where the preview column used to be). Resize explicitly instead,
+        # narrowing for horizontal and widening for vertical only when the
+        # current size actually calls for it either way.
+        current_w, current_h = self.root.winfo_width(), self.root.winfo_height()
+        target_w = min_w if horizontal else max(current_w, min_w)
+        target_h = max(current_h, min_h)
+        if (target_w, target_h) != (current_w, current_h):
+            self.root.geometry(f"{target_w}x{target_h}")
+
         self._on_preview_resize()
 
     def _on_wp_mode_selected(self, _event=None):

@@ -30,6 +30,63 @@ WM_CLASS = "risemode-settings"
 ICON_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icon.png")
 
 
+class Switch(tk.Canvas):
+    """An on/off switch (ttk has no such style built in on Linux) - draws a
+    sliding knob on a pill-shaped track, toggled by a click anywhere on it.
+    Takes a `variable`/`command` pair like ttk.Checkbutton does, so it drops
+    in as a replacement without changing how callers wire it up."""
+    WIDTH, HEIGHT = 40, 22
+    ON_COLOR = "#4caf50"    # matches the Apply button's own "saved" flash
+    OFF_COLOR = "#b0b0b0"
+    KNOB_COLOR = "#ffffff"
+
+    def __init__(self, master, variable, command=None):
+        # Canvas is a plain Tk widget, not a themed ttk one - it won't pick
+        # up the theme's background on its own, so it's looked up explicitly
+        # to blend in with the ttk.Frame/LabelFrame it's always placed in.
+        bg = ttk.Style().lookup("TFrame", "background") or master.cget("background")
+        super().__init__(master, width=self.WIDTH, height=self.HEIGHT,
+                          highlightthickness=0, bd=0, bg=bg, cursor="hand2")
+        self.variable = variable
+        self.command = command
+        self.bind("<Button-1>", self._on_click)
+        variable.trace_add("write", lambda *_a: self._redraw())
+        self._redraw()
+
+    def _on_click(self, _event=None):
+        if str(self["state"]) == "disabled":
+            return
+        self.variable.set(not self.variable.get())
+        if self.command:
+            self.command()
+
+    def _redraw(self):
+        self.delete("all")
+        on = bool(self.variable.get())
+        color = self.ON_COLOR if on else self.OFF_COLOR
+        if str(self["state"]) == "disabled":
+            color = "#d5d5d5"
+        r = self.HEIGHT / 2
+        self.create_oval(0, 0, self.HEIGHT, self.HEIGHT, fill=color, outline=color)
+        self.create_oval(self.WIDTH - self.HEIGHT, 0, self.WIDTH, self.HEIGHT,
+                          fill=color, outline=color)
+        self.create_rectangle(r, 0, self.WIDTH - r, self.HEIGHT, fill=color, outline=color)
+        pad = 2
+        knob_x = (self.WIDTH - self.HEIGHT) if on else 0
+        self.create_oval(knob_x + pad, pad, knob_x + self.HEIGHT - pad, self.HEIGHT - pad,
+                          fill=self.KNOB_COLOR, outline="#888888")
+
+    def configure(self, **kwargs):
+        # "state" needs a re-draw (disabled renders grayed-out) on top of
+        # whatever Canvas itself already does with it - not currently used
+        # by any caller, but kept for parity with ttk.Checkbutton's API.
+        if "state" in kwargs:
+            super().configure(state=kwargs.pop("state"))
+            self._redraw()
+        if kwargs:
+            super().configure(**kwargs)
+
+
 class SettingsApp:
     def __init__(self, root):
         self.root = root
@@ -91,12 +148,14 @@ class SettingsApp:
 
         # Game Mode is independent of the desktop/custom choice above - it
         # overlays a poster on top of whichever of those is picked, only
-        # while a game is actually running - so it's a checkbox, not a
-        # third mutually-exclusive radio option.
-        ttk.Checkbutton(
-            wp_frame, text=pr.GAME_MODE_LABEL,
-            variable=self.game_mode_enabled, command=self._sync_wp_state,
-        ).pack(anchor="w", pady=(10, 3))
+        # while a game is actually running - so it's a toggle, not a third
+        # mutually-exclusive radio/combobox option.
+        game_mode_row = ttk.Frame(wp_frame)
+        game_mode_row.pack(fill="x", pady=(10, 3))
+        ttk.Label(game_mode_row, text=pr.GAME_MODE_LABEL).pack(side="left")
+        Switch(
+            game_mode_row, variable=self.game_mode_enabled, command=self._sync_wp_state,
+        ).pack(side="right")
 
         game_key_row = ttk.Frame(wp_frame)
         game_key_row.pack(fill="x", padx=(20, 0))
@@ -124,7 +183,10 @@ class SettingsApp:
         for key, label in pr.SENSOR_LABELS.items():
             var = tk.BooleanVar(value=config["sensors"].get(key, True))
             self.sensor_vars[key] = var
-            ttk.Checkbutton(sensors_frame, text=label, variable=var).pack(anchor="w", pady=3)
+            row = ttk.Frame(sensors_frame)
+            row.pack(fill="x", pady=3)
+            ttk.Label(row, text=label).pack(side="left")
+            Switch(row, variable=var).pack(side="right")
 
         # --- Colors ---
         colors_frame = ttk.LabelFrame(controls, text="Colors", padding=12)

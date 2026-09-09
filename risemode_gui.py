@@ -66,21 +66,27 @@ class SettingsApp:
         self.game_mode_enabled = tk.BooleanVar(value=config.get("game_mode_enabled", False))
         self.game_api_key = tk.StringVar(value=config.get("steamgriddb_api_key", ""))
 
-        ttk.Radiobutton(
-            wp_frame, text=pr.BACKGROUND_MODE_LABELS["desktop"],
-            variable=self.wp_mode, value="desktop", command=self._sync_wp_state,
-        ).pack(anchor="w", pady=3)
+        # Source: desktop wallpaper vs. custom image - a combobox rather than
+        # radio buttons since it's a single either/or choice, not a set of
+        # independent options worth showing all at once.
+        self._wp_mode_by_label = {v: k for k, v in pr.BACKGROUND_MODE_LABELS.items()}
+        mode_row = ttk.Frame(wp_frame)
+        mode_row.pack(fill="x", pady=3)
+        ttk.Label(mode_row, text="Source:").pack(side="left")
+        self.wp_mode_combo = ttk.Combobox(
+            mode_row, values=list(pr.BACKGROUND_MODE_LABELS.values()),
+            state="readonly", width=26,
+        )
+        self.wp_mode_combo.set(pr.BACKGROUND_MODE_LABELS[self.wp_mode.get()])
+        self.wp_mode_combo.pack(side="left", padx=6, fill="x", expand=True)
+        self.wp_mode_combo.bind("<<ComboboxSelected>>", self._on_wp_mode_selected)
 
         custom_row = ttk.Frame(wp_frame)
         custom_row.pack(fill="x", pady=(6, 0))
-        ttk.Radiobutton(
-            custom_row, text="Custom image:", variable=self.wp_mode,
-            value="custom", command=self._sync_wp_state,
-        ).pack(side="left")
         self.wp_entry = ttk.Entry(custom_row, textvariable=self.wp_path, width=28)
-        self.wp_entry.pack(side="left", padx=6, fill="x", expand=True)
+        self.wp_entry.pack(side="left", fill="x", expand=True)
         self.wp_browse = ttk.Button(custom_row, text="Browse...", command=self._browse)
-        self.wp_browse.pack(side="left")
+        self.wp_browse.pack(side="left", padx=(6, 0))
 
         # Game Mode is independent of the desktop/custom choice above - it
         # overlays a poster on top of whichever of those is picked, only
@@ -175,6 +181,10 @@ class SettingsApp:
 
         self._tick_preview()
 
+    def _on_wp_mode_selected(self, _event=None):
+        self.wp_mode.set(self._wp_mode_by_label[self.wp_mode_combo.get()])
+        self._sync_wp_state()
+
     def _sync_wp_state(self):
         custom_state = "normal" if self.wp_mode.get() == "custom" else "disabled"
         self.wp_entry.configure(state=custom_state)
@@ -192,6 +202,7 @@ class SettingsApp:
         if path:
             self.wp_path.set(path)
             self.wp_mode.set("custom")
+            self.wp_mode_combo.set(pr.BACKGROUND_MODE_LABELS["custom"])
             self._sync_wp_state()
 
     @staticmethod

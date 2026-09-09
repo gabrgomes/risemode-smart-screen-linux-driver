@@ -175,6 +175,23 @@ class SettingsApp:
 
         self._sync_wp_state()
 
+        # --- Display ---
+        display_frame = ttk.LabelFrame(controls, text="Display", padding=12)
+        display_frame.pack(fill="x", pady=(0, 16))
+
+        self.orientation = tk.StringVar(value=config.get("orientation", "vertical"))
+        self._orientation_by_label = {v: k for k, v in pr.ORIENTATION_LABELS.items()}
+        orientation_row = ttk.Frame(display_frame)
+        orientation_row.pack(fill="x")
+        ttk.Label(orientation_row, text="Orientation:").pack(side="left")
+        self.orientation_combo = ttk.Combobox(
+            orientation_row, values=list(pr.ORIENTATION_LABELS.values()),
+            state="readonly", width=22,
+        )
+        self.orientation_combo.set(pr.ORIENTATION_LABELS[self.orientation.get()])
+        self.orientation_combo.pack(side="left", padx=6, fill="x", expand=True)
+        self.orientation_combo.bind("<<ComboboxSelected>>", self._on_orientation_selected)
+
         # --- Sensors ---
         sensors_frame = ttk.LabelFrame(controls, text="Sensors", padding=12)
         sensors_frame.pack(fill="x", pady=(0, 16))
@@ -289,6 +306,10 @@ class SettingsApp:
         self.color_mode.set(self._color_mode_by_label[self.color_mode_combo.get()])
         self._sync_color_mode_state()
 
+    def _on_orientation_selected(self, _event=None):
+        self.orientation.set(self._orientation_by_label[self.orientation_combo.get()])
+        self._on_preview_resize()  # aspect ratio changed - re-fit immediately
+
     def _sync_color_mode_state(self):
         # Swatches always show whichever colors are actually in effect -
         # only editable (and only meaningful to click) in "custom" mode.
@@ -321,6 +342,7 @@ class SettingsApp:
             "sensors": {k: v.get() for k, v in self.sensor_vars.items()},
             "colors": {k: list(v) for k, v in self.colors.items()},
             "color_mode": self.color_mode.get(),
+            "orientation": self.orientation.get(),
         }
 
     def _apply(self):
@@ -353,9 +375,13 @@ class SettingsApp:
             self._preview_frame.winfo_height() - 2 * FRAME_PADDING - heading_h - apply_h, 50
         )
 
-        # Fit the panel's fixed 462x1920 aspect ratio into the available
-        # space, whichever axis is the tighter constraint.
-        ratio = pr.WIDTH / pr.HEIGHT
+        # Fit the chosen orientation's logical canvas aspect ratio (portrait
+        # 462x1920, or landscape 1920x462) into the available space,
+        # whichever axis is the tighter constraint - the preview always
+        # shows render_stats_pil()'s own upright logical image, never the
+        # physical panel buffer's rotated layout.
+        canvas_w, canvas_h = pr.CANVAS_SIZES[self.orientation.get()]
+        ratio = canvas_w / canvas_h
         w, h = avail_w, round(avail_w / ratio)
         if h > avail_h:
             h, w = avail_h, round(avail_h * ratio)

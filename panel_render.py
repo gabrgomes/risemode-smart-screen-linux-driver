@@ -22,7 +22,23 @@ from collections import deque
 import psutil
 from PIL import Image, ImageDraw, ImageFont
 
-WIDTH, HEIGHT = 462, 1920
+WIDTH, HEIGHT = 462, 1920  # the physical panel's fixed native buffer size -
+                           # always portrait, regardless of ORIENTATION below
+
+ORIENTATIONS = ("vertical", "horizontal")
+ORIENTATION_LABELS = {
+    "vertical": "Vertical (portrait)",
+    "horizontal": "Horizontal (landscape)",
+}
+# The logical canvas each orientation is laid out and rendered at.
+# "horizontal" renders a wide 1920x462 image with a row-based layout, then
+# render_stats_image() rotates that into the panel's fixed portrait buffer
+# above right before sending - the physical panel itself never changes
+# size, only how the content is composed before being rotated to fit it.
+CANVAS_SIZES = {
+    "vertical": (WIDTH, HEIGHT),
+    "horizontal": (HEIGHT, WIDTH),
+}
 
 MANGOHUD_LOG_DIR = os.path.expanduser("~/.local/share/mangohud_logs")
 MANGOHUD_STALE_S = 3  # ignore logs that haven't been touched recently -
@@ -126,6 +142,9 @@ def load_config():
         game_mode_enabled = True
     if background_mode not in BACKGROUND_MODES:
         background_mode = "desktop"
+    orientation = data.get("orientation", "vertical")
+    if orientation not in ORIENTATIONS:
+        orientation = "vertical"
     return {
         "wallpaper": data.get("wallpaper"),
         "background_mode": background_mode,
@@ -134,6 +153,7 @@ def load_config():
         "sensors": sensors,
         "colors": colors,
         "color_mode": color_mode,
+        "orientation": orientation,
     }
 
 
@@ -274,6 +294,13 @@ def load_font(size):
 FONT_DATE = load_font(54)
 FONT_BIG = load_font(64)
 FONT_MED = load_font(36)
+
+# Horizontal orientation's canvas is only WIDTH (462px) tall, vs. vertical's
+# HEIGHT (1920px) - a label/value/secondary column has to fit in far less
+# vertical space, hence the smaller sizes.
+FONT_LABEL_H = load_font(24)
+FONT_VALUE_H = load_font(46)
+FONT_SECONDARY_H = load_font(22)
 
 
 def get_wallpaper_path():
@@ -521,48 +548,55 @@ def _compute_auto_colors(bg_img):
     }
 
 
-_background_cache = {"path": None, "mtime": None, "image": None, "auto_colors": None}
+_background_cache = {
+    "path": None, "mtime": None, "canvas_size": None, "image": None, "auto_colors": None,
+}
 
 
-def get_auto_colors(wallpaper_override=None):
+def get_auto_colors(wallpaper_override=None, canvas_size=(WIDTH, HEIGHT)):
     """Colors derived from the current background image (see
     _compute_auto_colors) - cached alongside the background itself in
     load_background(), so this is only recomputed when the background
     actually changes, not every frame."""
-    load_background(wallpaper_override)  # ensures the cache below is current
+    load_background(wallpaper_override, canvas_size)  # ensures the cache below is current
     return _background_cache["auto_colors"] or DEFAULT_COLORS
 
 
-def load_background(wallpaper_override=None):
+def load_background(wallpaper_override=None, canvas_size=(WIDTH, HEIGHT)):
     """Loads the panel background, center-cropped and scaled to fill the
-    panel (462x1920, portrait) and dimmed so stat text stays readable over
+    given logical canvas size (see CANVAS_SIZES - portrait for "vertical",
+    landscape for "horizontal") and dimmed so stat text stays readable over
     it. If wallpaper_override is a readable file, it's used as-is (this is
     how the GUI's chosen image and the saved config's override both flow
     in); otherwise falls back to the desktop wallpaper. Cached and only
-    re-decoded if the effective path or its mtime changes. Falls back to a
-    plain dark background if nothing is set/found/readable."""
+    re-decoded if the effective path, its mtime, or the requested
+    canvas_size changes (switching orientation needs a differently-cropped
+    image, not just a resize). Falls back to a plain dark background if
+    nothing is set/found/readable."""
     if wallpaper_override and os.path.isfile(wallpaper_override):
         path = wallpaper_override
     else:
         path = get_wallpaper_path()
     if path is None or not os.path.isfile(path):
-        fallback = Image.new("RGB", (WIDTH, HEIGHT), BG_FALLBACK)
-        if _background_cache["path"] is not None:
-            # was showing a real image before, now isn't - keep auto_colors
-            # in sync rather than leaving it stale from that last image.
+        fallback = Image.new("RGB", canvas_size, BG_FALLBACK)
+        if _background_cache["path"] is not None or _background_cache["canvas_size"] != canvas_size:
+            # was showing a real image (or a different-sized fallback)
+            # before, now isn't - keep auto_colors in sync rather than
+            # leaving it stale from that last image.
             _background_cache.update(
-                path=None, mtime=None, image=fallback,
+                path=None, mtime=None, canvas_size=canvas_size, image=fallback,
                 auto_colors=_compute_auto_colors(fallback),
             )
         return fallback
 
     mtime = os.path.getmtime(path)
-    if _background_cache["path"] == path and _background_cache["mtime"] == mtime:
+    if (_background_cache["path"] == path and _background_cache["mtime"] == mtime
+            and _background_cache["canvas_size"] == canvas_size):
         return _background_cache["image"]
 
     try:
         src = Image.open(path).convert("RGB")
-        target_ratio = WIDTH / HEIGHT
+        target_ratio = canvas_size[0] / canvas_size[1]
         src_ratio = src.width / src.height
         if src_ratio > target_ratio:
             new_width = round(src.height * target_ratio)
@@ -572,14 +606,15 @@ def load_background(wallpaper_override=None):
             new_height = round(src.width / target_ratio)
             top = (src.height - new_height) // 2
             src = src.crop((0, top, src.width, top + new_height))
-        src = src.resize((WIDTH, HEIGHT), Image.LANCZOS)
-        img = Image.blend(src, Image.new("RGB", (WIDTH, HEIGHT), (0, 0, 0)),
+        src = src.resize(canvas_size, Image.LANCZOS)
+        img = Image.blend(src, Image.new("RGB", canvas_size, (0, 0, 0)),
                            BG_DIM_ALPHA / 255)
     except (OSError, ValueError):
-        img = Image.new("RGB", (WIDTH, HEIGHT), BG_FALLBACK)
+        img = Image.new("RGB", canvas_size, BG_FALLBACK)
 
     _background_cache.update(
-        path=path, mtime=mtime, image=img, auto_colors=_compute_auto_colors(img)
+        path=path, mtime=mtime, canvas_size=canvas_size, image=img,
+        auto_colors=_compute_auto_colors(img),
     )
     return img
 
@@ -589,10 +624,11 @@ _fps_history = deque(maxlen=200)
 def _draw_device_block(draw, y, label, value_text, secondary_parts, colors):
     """Draws one `LABEL` / big-value block with optional smaller secondary
     readings (temperature, VRAM, power, ...) packed onto a single line right
-    below it - the shared "device" visual theme CPU and GPU both use.
-    secondary_parts is a list of text strings (colors["secondary"] is used
-    for all of them - callers used to pass a color per part, but every
-    caller always passed the same one anyway); pass [] for none."""
+    below it - the shared "device" visual theme CPU and GPU both use in the
+    vertical layout (a stack of these, top to bottom). secondary_parts is a
+    list of text strings (colors["secondary"] is used for all of them -
+    callers used to pass a color per part, but every caller always passed
+    the same one anyway); pass [] for none."""
     draw.text((20, y), label, font=FONT_MED, fill=tuple(colors["label"]))
     y += 44
     draw.text((20, y), value_text, font=FONT_BIG, fill=tuple(colors["value"]))
@@ -608,48 +644,16 @@ def _draw_device_block(draw, y, label, value_text, secondary_parts, colors):
     return y
 
 
-def render_stats_pil(config=None):
-    """Renders one frame as an upright (non-rotated) PIL Image. config
-    defaults to the saved on-disk config; the GUI passes its own in-memory
-    (not-yet-applied) selections here to preview them before saving."""
-    if config is None:
-        config = get_config()
-    sensors = config.get("sensors", DEFAULT_SENSORS)
-
-    game_stats = get_game_stats()
-    fps = game_stats.get("fps")
-    frametime = game_stats.get("frametime")
-    if fps is None:
-        _fps_history.clear()
-        fps_low1 = None
-    else:
-        _fps_history.append(fps)
-        fps_low1 = fps
-        if len(_fps_history) >= 10:
-            sample = sorted(_fps_history)
-            cutoff = max(1, len(sample) // 100)
-            fps_low1 = sum(sample[:cutoff]) / cutoff
-
-    bg_path = resolve_background_path(config)
-
-    if config.get("color_mode", "custom") == "auto":
-        colors = get_auto_colors(bg_path)
-    else:
-        colors = config.get("colors", DEFAULT_COLORS)
+def _render_vertical(draw, canvas_w, canvas_h, sensors, cpu, mem, cpu_temp,
+                      gpu_load, gpu_temp, gpu_vram_used, gpu_power,
+                      fps, fps_low1, frametime, colors):
+    """The original portrait layout: one column, each enabled block stacked
+    top to bottom (CPU, RAM, GPU, a separator, FPS/1% low/frame time), with
+    the clock pinned to the bottom regardless of what's above it."""
     label_color = tuple(colors["label"])
     value_color = tuple(colors["value"])
     secondary_color = tuple(colors["secondary"])
     separator_color = tuple(colors["separator"])
-
-    img = load_background(bg_path).copy()  # copy: caller
-                                     # draws on this, cached original must
-                                     # stay untouched
-    draw = ImageDraw.Draw(img)
-
-    cpu = psutil.cpu_percent()
-    mem = psutil.virtual_memory().percent
-    cpu_temp = get_cpu_temp()
-    gpu_load, gpu_temp, gpu_vram_used, gpu_vram_total, gpu_power = get_gpu_stats()
 
     y = 40
     if sensors.get("cpu", True):
@@ -673,7 +677,7 @@ def render_stats_pil(config=None):
 
     if sensors.get("fps", True) or sensors.get("frametime", True):
         y += 30
-        draw.line([(20, y), (WIDTH - 20, y)], fill=separator_color, width=2)
+        draw.line([(20, y), (canvas_w - 20, y)], fill=separator_color, width=2)
         y += 30
 
     if sensors.get("fps", True):
@@ -694,18 +698,162 @@ def render_stats_pil(config=None):
         y += 90
 
     if sensors.get("clock", True):
-        y = HEIGHT - 140
+        y = canvas_h - 140
         draw.text((20, y), time.strftime("%H:%M:%S"), font=FONT_BIG, fill=value_color)
         y += 70
         draw.text((20, y), time.strftime("%d-%m-%Y"), font=FONT_DATE, fill=secondary_color)
 
+
+def _draw_column(draw, x0, col_width, canvas_h, label, value_text, secondary_text, colors):
+    """Draws one label/value/secondary group centered (both axes) within a
+    column of the given width - the horizontal layout's equivalent of
+    _draw_device_block, since a short, wide canvas has room for several of
+    these side by side but not stacked on top of each other. label=None
+    skips that line entirely (used for the clock, which the vertical layout
+    also shows with no label above it, just the time then the date)."""
+    lines = []
+    if label:
+        lines.append((label, FONT_LABEL_H, tuple(colors["label"])))
+    lines.append((value_text, FONT_VALUE_H, tuple(colors["value"])))
+    if secondary_text:
+        lines.append((secondary_text, FONT_SECONDARY_H, tuple(colors["secondary"])))
+
+    gap = 8
+    heights = [draw.textbbox((0, 0), text, font=font)[3] for text, font, _ in lines]
+    total_h = sum(heights) + gap * (len(lines) - 1)
+    y = (canvas_h - total_h) / 2
+    for (text, font, color), h in zip(lines, heights):
+        w = draw.textlength(text, font=font)
+        draw.text((x0 + (col_width - w) / 2, y), text, font=font, fill=color)
+        y += h + gap
+
+
+def _render_horizontal(draw, canvas_w, canvas_h, sensors, cpu, mem, cpu_temp,
+                        gpu_load, gpu_temp, gpu_vram_used, gpu_power,
+                        fps, fps_low1, frametime, colors):
+    """The landscape layout: since the canvas is short (canvas_h is the
+    panel's native WIDTH, 462px) but wide (canvas_w is its native HEIGHT,
+    1920px), there's no room to stack blocks vertically the way the
+    portrait layout does - instead each enabled reading gets its own
+    column, all in a single row, sized to evenly fill the width. Grouped
+    the same way the vertical layout's separator line groups them (system
+    stats vs. game stats+clock), just as a vertical divider instead."""
+    system_cols = []
+    if sensors.get("cpu", True):
+        secondary = (
+            f"{cpu_temp:.0f}°C" if sensors.get("cpu_temp", True) and cpu_temp is not None else None
+        )
+        system_cols.append(("CPU", f"{cpu:.0f}%", secondary))
+    if sensors.get("ram", True):
+        system_cols.append(("RAM", f"{mem:.0f}%", None))
+    if sensors.get("gpu", True) and gpu_load is not None:
+        parts = []
+        if sensors.get("gpu_temp", True) and gpu_temp is not None:
+            parts.append(f"{gpu_temp:.0f}°C")
+        if sensors.get("gpu_vram", True) and gpu_vram_used is not None:
+            parts.append(f"{gpu_vram_used / 1024:.1f}GB")
+        if sensors.get("gpu_power", True) and gpu_power is not None:
+            parts.append(f"{gpu_power:.0f}W")
+        system_cols.append(("GPU", f"{gpu_load:.0f}%", " ".join(parts) if parts else None))
+
+    game_cols = []
+    if sensors.get("fps", True):
+        game_cols.append(("FPS", f"{fps:.1f}" if fps is not None else "--", None))
+        game_cols.append(("1% LOW", f"{fps_low1:.1f}" if fps_low1 is not None else "--", None))
+    if sensors.get("frametime", True):
+        game_cols.append(("FRAME TIME", f"{frametime:.1f}ms" if frametime is not None else "--", None))
+    if sensors.get("clock", True):
+        game_cols.append((None, time.strftime("%H:%M:%S"), time.strftime("%d-%m-%Y")))
+
+    columns = system_cols + game_cols
+    if not columns:
+        return
+    col_width = canvas_w / len(columns)
+    for i, (label, value_text, secondary_text) in enumerate(columns):
+        _draw_column(draw, i * col_width, col_width, canvas_h, label, value_text, secondary_text, colors)
+
+    if system_cols and game_cols:
+        sep_x = len(system_cols) * col_width
+        margin = canvas_h * 0.2
+        draw.line([(sep_x, margin), (sep_x, canvas_h - margin)],
+                  fill=tuple(colors["separator"]), width=2)
+
+
+def render_stats_pil(config=None):
+    """Renders one frame as an upright (non-rotated) PIL Image, at whichever
+    logical canvas size and layout the config's orientation calls for (see
+    CANVAS_SIZES/_render_vertical/_render_horizontal). config defaults to
+    the saved on-disk config; the GUI passes its own in-memory (not-yet-
+    applied) selections here to preview them before saving."""
+    if config is None:
+        config = get_config()
+    sensors = config.get("sensors", DEFAULT_SENSORS)
+    orientation = config.get("orientation", "vertical")
+    if orientation not in ORIENTATIONS:
+        orientation = "vertical"
+    canvas_size = CANVAS_SIZES[orientation]
+
+    game_stats = get_game_stats()
+    fps = game_stats.get("fps")
+    frametime = game_stats.get("frametime")
+    if fps is None:
+        _fps_history.clear()
+        fps_low1 = None
+    else:
+        _fps_history.append(fps)
+        fps_low1 = fps
+        if len(_fps_history) >= 10:
+            sample = sorted(_fps_history)
+            cutoff = max(1, len(sample) // 100)
+            fps_low1 = sum(sample[:cutoff]) / cutoff
+
+    bg_path = resolve_background_path(config)
+
+    if config.get("color_mode", "custom") == "auto":
+        colors = get_auto_colors(bg_path, canvas_size)
+    else:
+        colors = config.get("colors", DEFAULT_COLORS)
+
+    img = load_background(bg_path, canvas_size).copy()  # copy: caller
+                                     # draws on this, cached original must
+                                     # stay untouched
+    draw = ImageDraw.Draw(img)
+
+    cpu = psutil.cpu_percent()
+    mem = psutil.virtual_memory().percent
+    cpu_temp = get_cpu_temp()
+    gpu_load, gpu_temp, gpu_vram_used, gpu_vram_total, gpu_power = get_gpu_stats()
+
+    canvas_w, canvas_h = canvas_size
+    render_fn = _render_horizontal if orientation == "horizontal" else _render_vertical
+    render_fn(draw, canvas_w, canvas_h, sensors, cpu, mem, cpu_temp,
+              gpu_load, gpu_temp, gpu_vram_used, gpu_power,
+              fps, fps_low1, frametime, colors)
+
     return img
 
 
+# Landscape logical canvas -> portrait physical buffer. Flip the sign here
+# if the panel ends up mounted the other way around in practice - there's
+# no way to know which without the physical hardware in hand.
+HORIZONTAL_ROTATE_DEGREES = -90
+
+
 def render_stats_image(config=None):
-    """Renders one frame as JPEG bytes, rotated 180 degrees as the panel
-    expects (see risemode_driver.py's protocol notes)."""
-    img = render_stats_pil(config).rotate(180)
+    """Renders one frame as JPEG bytes, in the physical panel's fixed
+    462x1920 buffer size regardless of the logical orientation chosen in
+    settings - "horizontal" renders its own wide layout first (see
+    render_stats_pil) and gets rotated into the tall physical buffer here.
+    That rotation is separate from, and applied before, the unconditional
+    180-degree one below, which is a fixed hardware/protocol quirk (see
+    risemode_driver.py's protocol notes) unrelated to the chosen
+    orientation."""
+    if config is None:
+        config = get_config()
+    img = render_stats_pil(config)
+    if config.get("orientation", "vertical") == "horizontal":
+        img = img.rotate(HORIZONTAL_ROTATE_DEGREES, expand=True)
+    img = img.rotate(180)
     buf = io.BytesIO()
     img.save(buf, format="JPEG", quality=85)
     return buf.getvalue()

@@ -99,20 +99,34 @@ class SettingsApp:
         style.configure("TLabelframe.Label", font=("TkDefaultFont", BASE_FONT_SIZE, "bold"))
         style.configure("Heading.TLabel", font=("TkDefaultFont", BASE_FONT_SIZE, "bold"))
 
-        root.columnconfigure(0, weight=0)
-        root.columnconfigure(1, weight=1)
-        root.rowconfigure(0, weight=1)
-
         config = pr.get_config()
 
         controls = ttk.Frame(root, padding=18)
-        controls.grid(row=0, column=0, sticky="n")
         self.controls = controls
 
         preview_frame = ttk.Frame(root, padding=FRAME_PADDING)
-        preview_frame.grid(row=0, column=1, sticky="nsew")
         preview_frame.columnconfigure(0, weight=1)
         preview_frame.rowconfigure(1, weight=1)
+        self._preview_frame = preview_frame
+
+        # --- Display --- (first: orientation affects every other section's
+        # layout, including where the preview itself ends up - see
+        # _apply_layout_mode())
+        display_frame = ttk.LabelFrame(controls, text="Display", padding=12)
+        display_frame.pack(fill="x", pady=(0, 16))
+
+        self.orientation = tk.StringVar(value=config.get("orientation", "vertical"))
+        self._orientation_by_label = {v: k for k, v in pr.ORIENTATION_LABELS.items()}
+        orientation_row = ttk.Frame(display_frame)
+        orientation_row.pack(fill="x")
+        ttk.Label(orientation_row, text="Orientation:").pack(side="left")
+        self.orientation_combo = ttk.Combobox(
+            orientation_row, values=list(pr.ORIENTATION_LABELS.values()),
+            state="readonly", width=22,
+        )
+        self.orientation_combo.set(pr.ORIENTATION_LABELS[self.orientation.get()])
+        self.orientation_combo.pack(side="left", padx=6, fill="x", expand=True)
+        self.orientation_combo.bind("<<ComboboxSelected>>", self._on_orientation_selected)
 
         # --- Background ---
         wp_frame = ttk.LabelFrame(controls, text="Background", padding=12)
@@ -175,23 +189,6 @@ class SettingsApp:
 
         self._sync_wp_state()
 
-        # --- Display ---
-        display_frame = ttk.LabelFrame(controls, text="Display", padding=12)
-        display_frame.pack(fill="x", pady=(0, 16))
-
-        self.orientation = tk.StringVar(value=config.get("orientation", "vertical"))
-        self._orientation_by_label = {v: k for k, v in pr.ORIENTATION_LABELS.items()}
-        orientation_row = ttk.Frame(display_frame)
-        orientation_row.pack(fill="x")
-        ttk.Label(orientation_row, text="Orientation:").pack(side="left")
-        self.orientation_combo = ttk.Combobox(
-            orientation_row, values=list(pr.ORIENTATION_LABELS.values()),
-            state="readonly", width=22,
-        )
-        self.orientation_combo.set(pr.ORIENTATION_LABELS[self.orientation.get()])
-        self.orientation_combo.pack(side="left", padx=6, fill="x", expand=True)
-        self.orientation_combo.bind("<<ComboboxSelected>>", self._on_orientation_selected)
-
         # --- Sensors ---
         sensors_frame = ttk.LabelFrame(controls, text="Sensors", padding=12)
         sensors_frame.pack(fill="x", pady=(0, 16))
@@ -249,21 +246,45 @@ class SettingsApp:
         self.apply_button.pack(ipadx=10, ipady=0)  # matches wp_browse's height
         self._apply_default_bg = self.apply_button.cget("background")
 
-        self._preview_frame = preview_frame
         self._last_pil_img = None
         self._preview_size = (PREVIEW_WIDTH, PREVIEW_HEIGHT)
         preview_frame.bind("<Configure>", lambda event: self._on_preview_resize())
 
-        # The controls column doesn't stretch (weight=0), so it can force
-        # the preview column to zero width unless minsize reserves it a
-        # usable amount up front - compute this from the controls' actual
-        # rendered width rather than guessing a fixed number.
-        root.update_idletasks()
-        min_w = controls.winfo_reqwidth() + 380
-        min_h = max(controls.winfo_reqheight() + 2 * FRAME_PADDING, 560)
-        root.minsize(min_w, min_h)
-
+        self._apply_layout_mode()
         self._tick_preview()
+
+    def _apply_layout_mode(self):
+        """Arranges controls and the live preview based on orientation:
+        side by side for vertical (controls a fixed-width left column, the
+        portrait preview filling the rest), or stacked for horizontal
+        (controls a full-width row on top, the wide landscape preview
+        filling the rest below it) - a side-by-side landscape preview would
+        otherwise be squeezed into a tall, narrow leftover strip next to
+        controls instead of the wide one it actually needs."""
+        self.root.update_idletasks()
+        if self.orientation.get() == "horizontal":
+            self.controls.grid(row=0, column=0, sticky="nw")
+            self._preview_frame.grid(row=1, column=0, sticky="nsew")
+            self.root.columnconfigure(0, weight=1)
+            self.root.columnconfigure(1, weight=0)
+            self.root.rowconfigure(0, weight=0)
+            self.root.rowconfigure(1, weight=1)
+            min_w = max(self.controls.winfo_reqwidth() + 2 * FRAME_PADDING, 900)
+            min_h = self.controls.winfo_reqheight() + 340
+        else:
+            self.controls.grid(row=0, column=0, sticky="nw")
+            self._preview_frame.grid(row=0, column=1, sticky="nsew")
+            self.root.columnconfigure(0, weight=0)
+            self.root.columnconfigure(1, weight=1)
+            self.root.rowconfigure(0, weight=1)
+            self.root.rowconfigure(1, weight=0)
+            # The controls column doesn't stretch (weight=0), so it can
+            # force the preview column to zero width unless minsize
+            # reserves it a usable amount up front.
+            min_w = self.controls.winfo_reqwidth() + 380
+            min_h = max(self.controls.winfo_reqheight() + 2 * FRAME_PADDING, 560)
+        self.root.minsize(min_w, min_h)
+        self._on_preview_resize()
 
     def _on_wp_mode_selected(self, _event=None):
         self.wp_mode.set(self._wp_mode_by_label[self.wp_mode_combo.get()])
@@ -308,7 +329,7 @@ class SettingsApp:
 
     def _on_orientation_selected(self, _event=None):
         self.orientation.set(self._orientation_by_label[self.orientation_combo.get()])
-        self._on_preview_resize()  # aspect ratio changed - re-fit immediately
+        self._apply_layout_mode()  # re-arranges controls/preview and re-fits the preview
 
     def _sync_color_mode_state(self):
         # Swatches always show whichever colors are actually in effect -

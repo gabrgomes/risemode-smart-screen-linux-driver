@@ -131,13 +131,17 @@ class SettingsApp:
         colors_frame.pack(fill="x", pady=(0, 16))
 
         self.color_mode = tk.StringVar(value=config.get("color_mode", "custom"))
+        self._color_mode_by_label = {v: k for k, v in pr.COLOR_MODE_LABELS.items()}
         mode_row = ttk.Frame(colors_frame)
         mode_row.pack(fill="x", pady=(0, 10))
-        for mode, label in pr.COLOR_MODE_LABELS.items():
-            ttk.Radiobutton(
-                mode_row, text=label, variable=self.color_mode, value=mode,
-                command=self._sync_color_mode_state,
-            ).pack(anchor="w")
+        ttk.Label(mode_row, text="Mode:").pack(side="left")
+        self.color_mode_combo = ttk.Combobox(
+            mode_row, values=list(pr.COLOR_MODE_LABELS.values()),
+            state="readonly", width=22,
+        )
+        self.color_mode_combo.set(pr.COLOR_MODE_LABELS[self.color_mode.get()])
+        self.color_mode_combo.pack(side="left", padx=6, fill="x", expand=True)
+        self.color_mode_combo.bind("<<ComboboxSelected>>", self._on_color_mode_selected)
 
         self.colors = {k: list(config["colors"][k]) for k in pr.COLOR_LABELS}
         self.color_buttons = {}
@@ -218,6 +222,10 @@ class SettingsApp:
     def _set_color_button(self, key, rgb):
         hexcolor = self._rgb_to_hex(rgb)
         self.color_buttons[key].configure(bg=hexcolor, activebackground=hexcolor)
+
+    def _on_color_mode_selected(self, _event=None):
+        self.color_mode.set(self._color_mode_by_label[self.color_mode_combo.get()])
+        self._sync_color_mode_state()
 
     def _sync_color_mode_state(self):
         # Swatches always show whichever colors are actually in effect -

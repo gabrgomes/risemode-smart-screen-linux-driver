@@ -70,22 +70,23 @@ class SettingsApp:
         # radio buttons since it's a single either/or choice, not a set of
         # independent options worth showing all at once.
         self._wp_mode_by_label = {v: k for k, v in pr.BACKGROUND_MODE_LABELS.items()}
-        mode_row = ttk.Frame(wp_frame)
-        mode_row.pack(fill="x", pady=3)
-        ttk.Label(mode_row, text="Source:").pack(side="left")
+        self._wp_mode_row = ttk.Frame(wp_frame)
+        self._wp_mode_row.pack(fill="x", pady=3)
+        ttk.Label(self._wp_mode_row, text="Source:").pack(side="left")
         self.wp_mode_combo = ttk.Combobox(
-            mode_row, values=list(pr.BACKGROUND_MODE_LABELS.values()),
+            self._wp_mode_row, values=list(pr.BACKGROUND_MODE_LABELS.values()),
             state="readonly", width=26,
         )
         self.wp_mode_combo.set(pr.BACKGROUND_MODE_LABELS[self.wp_mode.get()])
         self.wp_mode_combo.pack(side="left", padx=6, fill="x", expand=True)
         self.wp_mode_combo.bind("<<ComboboxSelected>>", self._on_wp_mode_selected)
 
-        custom_row = ttk.Frame(wp_frame)
-        custom_row.pack(fill="x", pady=(6, 0))
-        self.wp_entry = ttk.Entry(custom_row, textvariable=self.wp_path, width=28)
+        # Only shown/packed at all in "custom" mode - not just disabled -
+        # since it's meaningless otherwise.
+        self.custom_row = ttk.Frame(wp_frame)
+        self.wp_entry = ttk.Entry(self.custom_row, textvariable=self.wp_path, width=28)
         self.wp_entry.pack(side="left", fill="x", expand=True)
-        self.wp_browse = ttk.Button(custom_row, text="Browse...", command=self._browse)
+        self.wp_browse = ttk.Button(self.custom_row, text="Browse...", command=self._browse)
         self.wp_browse.pack(side="left", padx=(6, 0))
 
         # Game Mode is independent of the desktop/custom choice above - it
@@ -186,9 +187,14 @@ class SettingsApp:
         self._sync_wp_state()
 
     def _sync_wp_state(self):
-        custom_state = "normal" if self.wp_mode.get() == "custom" else "disabled"
-        self.wp_entry.configure(state=custom_state)
-        self.wp_browse.configure(state=custom_state)
+        if self.wp_mode.get() == "custom":
+            # pack()'s default behavior appends to the end of whatever's
+            # currently packed - re-showing this after being hidden would
+            # otherwise drop it below the Game Mode controls instead of
+            # back under the Source row where it belongs.
+            self.custom_row.pack(fill="x", pady=(6, 0), after=self._wp_mode_row)
+        else:
+            self.custom_row.pack_forget()
         game_state = "normal" if self.game_mode_enabled.get() else "disabled"
         self.game_key_entry.configure(state=game_state)
         if not self.game_mode_enabled.get():

@@ -635,9 +635,15 @@ def load_background(wallpaper_override=None, canvas_size=(WIDTH, HEIGHT)):
 
     try:
         src = Image.open(path).convert("RGB")
-        target_ratio = canvas_size[0] / canvas_size[1]
-        src_ratio = src.width / src.height
-        if src_ratio > target_ratio:
+        canvas_w, canvas_h = canvas_size
+        target_ratio = canvas_w / canvas_h
+        # Which axis to fit is forced by the canvas' own shape (portrait
+        # canvas -> fit height, landscape -> fit width), not auto-picked by
+        # comparing to the source image's own aspect ratio - an unusual
+        # source photo (e.g. already portrait-shaped) would otherwise flip
+        # which axis gets cropped instead of always cropping the same one
+        # for a given orientation.
+        if canvas_h >= canvas_w:
             new_width = round(src.height * target_ratio)
             left = (src.width - new_width) // 2
             src = src.crop((left, 0, left + new_width, src.height))

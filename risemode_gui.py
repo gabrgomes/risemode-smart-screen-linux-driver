@@ -43,12 +43,20 @@ class Switch(tk.Canvas):
     sliding knob on a pill-shaped track, toggled by a click anywhere on it.
     Takes a `variable`/`command` pair like ttk.Checkbutton does, so it drops
     in as a replacement without changing how callers wire it up."""
-    WIDTH, HEIGHT = 40, 22
+    ASPECT_RATIO = 40 / 22  # width:height - the original, fixed-size pill's
+                            # own proportions, kept when scaling to a
+                            # caller-given height instead of a fixed one
     ON_COLOR = "#4caf50"    # matches the Apply button's own "saved" flash
     OFF_COLOR = "#b0b0b0"
     KNOB_COLOR = "#ffffff"
 
-    def __init__(self, master, variable, command=None):
+    def __init__(self, master, variable, command=None, height=22):
+        # height defaults to the original fixed size, but every call site
+        # in this file passes SettingsApp's own measured row-text height
+        # instead, so the switch reads as part of the same line as its
+        # label rather than a small, disproportionate control beside it.
+        self.HEIGHT = height
+        self.WIDTH = round(height * self.ASPECT_RATIO)
         # Canvas is a plain Tk widget, not a themed ttk one - it won't pick
         # up the theme's background on its own, so it's looked up explicitly
         # to blend in with the ttk.Frame/LabelFrame it's always placed in.
@@ -106,6 +114,15 @@ class SettingsApp:
         style.configure(".", font=default_font)
         style.configure("TLabelframe.Label", font=("TkDefaultFont", BASE_FONT_SIZE, "bold"))
         style.configure("Heading.TLabel", font=("TkDefaultFont", BASE_FONT_SIZE, "bold"))
+
+        # How tall a Switch needs to be to match a row's own label text -
+        # measured directly from a throwaway label at the app's actual
+        # font/style rather than a hardcoded pixel guess, since Tk's point-
+        # to-pixel scaling varies a lot with the display's DPI.
+        probe = ttk.Label(root, text="Ag")
+        root.update_idletasks()
+        self._switch_height = probe.winfo_reqheight()
+        probe.destroy()
 
         config = pr.get_config()
 
@@ -200,21 +217,22 @@ class SettingsApp:
         ttk.Label(game_mode_row, text=pr.GAME_MODE_LABEL).pack(side="left")
         Switch(
             game_mode_row, variable=self.game_mode_enabled, command=self._sync_wp_state,
+            height=self._switch_height,
         ).pack(side="right")
 
         game_key_row = ttk.Frame(wp_frame)
         game_key_row.pack(fill="x", padx=(20, 0))
         ttk.Label(game_key_row, text="SteamGridDB API key:").pack(side="left")
         self.game_key_entry = ttk.Entry(
-            game_key_row, textvariable=self.game_api_key, width=22, show="*"
+            game_key_row, textvariable=self.game_api_key, width=22, show="*", font=("TkDefaultFont", BASE_FONT_SIZE - 1)
         )
         self.game_key_entry.pack(side="left", padx=6, fill="x", expand=True)
         ttk.Label(
             wp_frame, text="Get a free key at steamgriddb.com/profile/preferences",
-            foreground="#888888", padding=(20, 0, 0, 0),
+            foreground="#888888", padding=(20, 0, 0, 0), font=("TkDefaultFont", BASE_FONT_SIZE - 2)
         ).pack(anchor="w")
         self.game_status_label = ttk.Label(
-            wp_frame, text="", foreground="#888888", padding=(20, 4, 0, 0),
+            wp_frame, text="", foreground="#888888", padding=(20, 4, 0, 0), font=("TkDefaultFont", BASE_FONT_SIZE - 2),
         )
         self.game_status_label.pack(anchor="w")
 
@@ -231,7 +249,7 @@ class SettingsApp:
             row = ttk.Frame(sensors_frame)
             row.pack(fill="x", pady=3)
             ttk.Label(row, text=label).pack(side="left")
-            Switch(row, variable=var).pack(side="right")
+            Switch(row, variable=var, height=self._switch_height).pack(side="right")
 
         # --- Colors ---
         colors_frame = ttk.LabelFrame(controls, text="Colors", padding=SECTION_PADDING)

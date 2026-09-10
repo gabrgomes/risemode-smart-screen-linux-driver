@@ -81,7 +81,7 @@ Internally, `render_stats_pil()` renders "horizontal" as its own wide 1920x462 l
 
 ### Now playing (music widget)
 
-An optional "Now playing" sensor — a compact widget with the current track's album art, title, artist, and a progress bar, shown while something is playing or paused and hidden otherwise (like Game Mode's fallback). In the vertical layout it sits just above the clock; in horizontal it's a full-width strip along the bottom and the stat columns center in the space above it.
+An optional "Now playing" sensor — a widget with the current track's album art, title, artist, and a progress bar, shown while something is playing or paused and hidden otherwise (like Game Mode's fallback). In the vertical layout it sits above the clock, with a large centered thumbnail (~half the panel width) over centered text, since text gets the full panel width there rather than a cramped strip. In horizontal it's a full-width bottom strip with a small thumbnail on the left, and the stat columns center in the space above it.
 
 - Requires `playerctl` (`sudo apt install playerctl` — `install.sh` prompts for it). Without it the widget just never appears.
 - Data comes from MPRIS via one throttled `playerctl metadata` call (`get_music_info()` in `panel_render.py`, re-run at most once a second). Works with any MPRIS player — Spotify, VLC, mpv, Rhythmbox, and Chromium/Firefox web audio (YouTube, YT Music, Spotify Web, ...).

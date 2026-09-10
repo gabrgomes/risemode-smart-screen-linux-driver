@@ -840,54 +840,96 @@ def _ellipsize(draw, text, font, max_width):
     return (text[:lo].rstrip() + ell) if lo else ell
 
 
-def _draw_music_block(img, draw, box, art_path, title, artist, progress, colors):
-    """Draws the "now playing" widget into `box` (x, y, w, h): a rounded
-    album-art thumbnail on the left, title over artist to its right (each
-    ellipsized to fit), and a thin progress bar under them. Font sizes and
-    the thumbnail size scale off `box`'s height, so the same code fits both
-    the tall vertical slot and the short landscape strip. `art_path` None
-    draws a note-glyph placeholder."""
-    x, y, w, h = box
-    pad = round(h * 0.08)
-    # Cap the thumbnail so it can't eat the whole width in the narrow
-    # vertical panel (462px) - it's only ever the full box height in the
-    # wide landscape strip.
-    art_size = max(1, min(h - 2 * pad, round(w * 0.26)))
-    art_x, art_y = x + pad, y + pad
-    radius = round(art_size * 0.12)
-
+def _prep_thumb(art_path, size, colors):
+    """(image, mask) for a rounded square album-art thumbnail of the given
+    side length - a note-glyph placeholder when art_path is missing or
+    unreadable."""
     thumb = None
     if art_path:
         try:
-            thumb = Image.open(art_path).convert("RGB").resize(
-                (art_size, art_size), Image.LANCZOS
-            )
+            thumb = Image.open(art_path).convert("RGB").resize((size, size), Image.LANCZOS)
         except (OSError, ValueError):
             thumb = None
     if thumb is None:
-        thumb = Image.new("RGB", (art_size, art_size),
+        thumb = Image.new("RGB", (size, size),
                           tuple(round(0.28 * c) for c in colors["value"]))
-        tdraw = ImageDraw.Draw(thumb)
-        note_font = _font(round(art_size * 0.55))
-        nb = tdraw.textbbox((0, 0), "♫", font=note_font)
-        tdraw.text(
-            ((art_size - (nb[2] - nb[0])) / 2 - nb[0],
-             (art_size - (nb[3] - nb[1])) / 2 - nb[1]),
-            "♫", font=note_font, fill=tuple(colors["secondary"]),
-        )
-
-    mask = Image.new("L", (art_size, art_size), 0)
+        td = ImageDraw.Draw(thumb)
+        nf = _font(round(size * 0.55))
+        nb = td.textbbox((0, 0), "♫", font=nf)
+        td.text(((size - (nb[2] - nb[0])) / 2 - nb[0],
+                 (size - (nb[3] - nb[1])) / 2 - nb[1]),
+                "♫", font=nf, fill=tuple(colors["secondary"]))
+    mask = Image.new("L", (size, size), 0)
     ImageDraw.Draw(mask).rounded_rectangle(
-        [0, 0, art_size - 1, art_size - 1], radius=radius, fill=255
+        [0, 0, size - 1, size - 1], radius=round(size * 0.12), fill=255
     )
+    return thumb, mask
+
+
+def _draw_progress_bar(draw, x, y, w, h, progress, colors):
+    draw.rounded_rectangle([x, y, x + w, y + h], radius=h / 2,
+                           fill=tuple(colors["separator"]))
+    filled = max(0.0, min(1.0, progress)) * w
+    if filled > h:
+        draw.rounded_rectangle([x, y, x + filled, y + h], radius=h / 2,
+                               fill=tuple(colors["label"]))
+
+
+def _draw_music_block(img, draw, box, art_path, title, artist, progress, colors, stacked=False):
+    """Draws the "now playing" widget into `box` (x, y, w, h).
+
+    stacked=False (landscape strip): rounded thumbnail on the left, title
+    over artist to its right, progress bar under the text - sizes scale off
+    the box's height.
+
+    stacked=True (narrow vertical panel): a big centered thumbnail
+    (~half the panel width) with centered title/artist and a full-width
+    progress bar below it - sizes scale off the box's width, since text
+    there gets the whole width rather than a cramped strip beside the art.
+
+    `art_path` None draws a note-glyph placeholder either way."""
+    x, y, w, h = box
+    title = title or "Unknown"
+    artist = artist or ""
+
+    if stacked:
+        art_size = round(w * 0.55)
+        thumb, mask = _prep_thumb(art_path, art_size, colors)
+        img.paste(thumb, (x + (w - art_size) // 2, y), mask)
+
+        cy = y + art_size + round(w * 0.05)
+        title_font = _font(round(w * 0.115))
+        artist_font = _font(round(w * 0.083))
+        title_line = _ellipsize(draw, title, title_font, w)
+        artist_line = _ellipsize(draw, artist, artist_font, w)
+
+        tb = draw.textbbox((0, 0), title_line, font=title_font)
+        tw = draw.textlength(title_line, font=title_font)
+        draw.text((x + (w - tw) / 2, cy - tb[1]), title_line,
+                  font=title_font, fill=tuple(colors["value"]))
+        cy += (tb[3] - tb[1]) + round(w * 0.03)
+        if artist_line:
+            ab = draw.textbbox((0, 0), artist_line, font=artist_font)
+            aw = draw.textlength(artist_line, font=artist_font)
+            draw.text((x + (w - aw) / 2, cy - ab[1]), artist_line,
+                      font=artist_font, fill=tuple(colors["secondary"]))
+            cy += (ab[3] - ab[1]) + round(w * 0.045)
+        if progress is not None:
+            _draw_progress_bar(draw, x, cy, w, max(3, round(w * 0.016)), progress, colors)
+        return
+
+    pad = round(h * 0.08)
+    art_size = max(1, min(h - 2 * pad, round(w * 0.26)))
+    art_x, art_y = x + pad, y + pad
+    thumb, mask = _prep_thumb(art_path, art_size, colors)
     img.paste(thumb, (art_x, art_y), mask)
 
     text_x = art_x + art_size + round(h * 0.10)
     text_w = max(1, x + w - pad - text_x)
     title_font = _font(round(h * 0.26))
     artist_font = _font(round(h * 0.19))
-    title_line = _ellipsize(draw, title or "Unknown", title_font, text_w)
-    artist_line = _ellipsize(draw, artist or "", artist_font, text_w)
+    title_line = _ellipsize(draw, title, title_font, text_w)
+    artist_line = _ellipsize(draw, artist, artist_font, text_w)
 
     tb = draw.textbbox((0, 0), title_line or "X", font=title_font)
     ab = draw.textbbox((0, 0), artist_line or "X", font=artist_font)
@@ -902,18 +944,8 @@ def _draw_music_block(img, draw, box, art_path, title, artist, progress, colors)
         draw.text((text_x, cy - ab[1]), artist_line, font=artist_font,
                   fill=tuple(colors["secondary"]))
     cy += (ab[3] - ab[1]) + line_gap
-
     if progress is not None:
-        draw.rounded_rectangle(
-            [text_x, cy, text_x + text_w, cy + bar_h], radius=bar_h / 2,
-            fill=tuple(colors["separator"]),
-        )
-        filled = max(0.0, min(1.0, progress)) * text_w
-        if filled > bar_h:
-            draw.rounded_rectangle(
-                [text_x, cy, text_x + filled, cy + bar_h], radius=bar_h / 2,
-                fill=tuple(colors["label"]),
-            )
+        _draw_progress_bar(draw, text_x, cy, text_w, bar_h, progress, colors)
 
 
 def _draw_device_block(draw, y, label, value_text, secondary_parts, colors):
@@ -994,12 +1026,15 @@ def _render_vertical(img, draw, canvas_w, canvas_h, sensors, cpu, mem, cpu_temp,
         y += 90
 
     if sensors.get("music", True) and music:
-        block_h = 180
+        bw = canvas_w - 40
+        # art (~0.55*w) + room for the two centered text lines and the bar
+        block_h = round(bw * 0.55) + round(bw * 0.34)
         block_bottom = (canvas_h - 140 - 40) if sensors.get("clock", True) else (canvas_h - 40)
         _draw_music_block(
-            img, draw, (20, block_bottom - block_h, canvas_w - 40, block_h),
+            img, draw, (20, block_bottom - block_h, bw, block_h),
             _fetch_album_art(music.get("art_url")),
             music.get("title"), music.get("artist"), _music_progress(music), colors,
+            stacked=True,
         )
 
     if sensors.get("clock", True):

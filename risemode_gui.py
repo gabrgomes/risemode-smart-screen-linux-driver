@@ -104,10 +104,25 @@ class SettingsApp:
         controls = ttk.Frame(root, padding=18)
         self.controls = controls
 
-        preview_frame = ttk.Frame(root, padding=FRAME_PADDING)
+        # A LabelFrame, not a plain Frame, so it carries the same bordered,
+        # titled look as Display/Background/Sensors/Colors - it was a bare
+        # heading + image before, visually lighter-weight than every other
+        # section.
+        preview_frame = ttk.LabelFrame(root, text="Live preview", padding=FRAME_PADDING)
         preview_frame.columnconfigure(0, weight=1)
-        preview_frame.rowconfigure(1, weight=1)
+        preview_frame.rowconfigure(0, weight=1)
         self._preview_frame = preview_frame
+
+        # Inner content holder so _on_preview_resize() can measure exactly
+        # the space actually available to the image/Apply button - querying
+        # preview_frame's own winfo_height() directly would also include
+        # its border and title-label reservation, which isn't part of the
+        # padding it was given and can't be read back out reliably.
+        preview_body = ttk.Frame(preview_frame)
+        preview_body.grid(row=0, column=0, sticky="nsew")
+        preview_body.columnconfigure(0, weight=1)
+        preview_body.rowconfigure(0, weight=1)
+        self._preview_body = preview_body
 
         # --- Display --- (first: orientation affects every other section's
         # layout, including where the preview itself ends up - see
@@ -231,15 +246,14 @@ class SettingsApp:
             self.color_buttons[key] = btn
         self._sync_color_mode_state()
 
-        # --- Preview ---
-        self.preview_heading = ttk.Label(preview_frame, text="Live preview", style="Heading.TLabel")
-        self.preview_heading.grid(row=0, column=0, pady=(0, 8))
-        self.preview_label = ttk.Label(preview_frame, anchor="center")
-        self.preview_label.grid(row=1, column=0, sticky="nsew")
+        # --- Preview --- (the section's own title comes from the
+        # LabelFrame itself now, not a separate heading widget)
+        self.preview_label = ttk.Label(preview_body, anchor="center")
+        self.preview_label.grid(row=0, column=0, sticky="nsew")
 
         # --- Apply --- (below the preview, not the controls column)
-        self.apply_row = ttk.Frame(preview_frame)
-        self.apply_row.grid(row=2, column=0, pady=(8, 0))
+        self.apply_row = ttk.Frame(preview_body)
+        self.apply_row.grid(row=1, column=0, pady=(8, 0))
         self.apply_button = tk.Button(
             self.apply_row, text="Apply", command=self._apply, font=default_font,
         )
@@ -264,7 +278,14 @@ class SettingsApp:
         self.root.update_idletasks()
         horizontal = self.orientation.get() == "horizontal"
         if horizontal:
-            self.controls.grid(row=0, column=0, sticky="nw")
+            # "new", not just "nw": controls has to actually stretch to
+            # fill the full (now single) column's width - min_w below can
+            # exceed controls' own natural width (the 900 floor), and
+            # without the "e" it would just sit at that narrower natural
+            # width, left-aligned, with the rest of the column empty
+            # beside it exactly where the vertical layout's preview column
+            # used to be.
+            self.controls.grid(row=0, column=0, sticky="new")
             self._preview_frame.grid(row=1, column=0, sticky="nsew")
             self.root.columnconfigure(0, weight=1)
             self.root.columnconfigure(1, weight=0)
@@ -395,21 +416,19 @@ class SettingsApp:
         # Query actual settled geometry rather than trusting a <Configure>
         # event's payload, which can lag one resize behind mid-drag.
         self.root.update_idletasks()
-        # winfo_width/height on a padded ttk.Frame includes its own padding,
-        # which is otherwise unavailable to its children - subtract it back
-        # out along with the heading label's own height.
-        avail_w = max(self._preview_frame.winfo_width() - 2 * FRAME_PADDING, 50)
-        heading_h = self.preview_heading.winfo_reqheight() + 8
+        # preview_body already excludes preview_frame's own padding *and*
+        # its border/title reservation (that's the point of measuring the
+        # inner frame instead of preview_frame directly - see its creation)
+        # - only the Apply row below the image still needs subtracting out.
+        avail_w = max(self._preview_body.winfo_width(), 50)
         apply_h = self.apply_row.winfo_reqheight() + 8
         # Capping this to controls' own (fixed) height would line up Apply
         # with its bottom, but then the preview would stop growing when
         # the window is resized taller - fitting the available space
-        # takes priority, so this uses preview_frame's actual height
-        # (which does grow with the window) even though that means Apply
-        # only lines up with the controls column at/near minsize.
-        avail_h = max(
-            self._preview_frame.winfo_height() - 2 * FRAME_PADDING - heading_h - apply_h, 50
-        )
+        # takes priority, so this uses preview_body's actual height (which
+        # does grow with the window) even though that means Apply only
+        # lines up with the controls column at/near minsize.
+        avail_h = max(self._preview_body.winfo_height() - apply_h, 50)
 
         # Fit the chosen orientation's logical canvas aspect ratio (portrait
         # 462x1920, or landscape 1920x462) into the available space,

@@ -118,10 +118,17 @@ class SettingsApp:
         # How tall a Switch needs to be to match a row's own label text -
         # measured directly from a throwaway label at the app's actual
         # font/style rather than a hardcoded pixel guess, since Tk's point-
-        # to-pixel scaling varies a lot with the display's DPI.
+        # to-pixel scaling varies a lot with the display's DPI. A Label's
+        # own reqheight is the font's full line box (ascent + descent + a
+        # little internal leading) though, not the text's visible size -
+        # matching a switch to that made it look oversized, since row text
+        # like "CPU usage" only visually fills roughly its cap-height.
+        # Cap-height commonly runs ~60% of a sans-serif font's full line
+        # height, so that fraction of the measured line height is what
+        # actually gets used as the target.
         probe = ttk.Label(root, text="Ag")
         root.update_idletasks()
-        self._switch_height = probe.winfo_reqheight()
+        self._switch_height = round(probe.winfo_reqheight() * 0.6)
         probe.destroy()
 
         config = pr.get_config()
@@ -222,7 +229,7 @@ class SettingsApp:
 
         game_key_row = ttk.Frame(wp_frame)
         game_key_row.pack(fill="x", padx=(20, 0))
-        ttk.Label(game_key_row, text="SteamGridDB API key:").pack(side="left")
+        ttk.Label(game_key_row, text="API key:").pack(side="left")
         self.game_key_entry = ttk.Entry(
             game_key_row, textvariable=self.game_api_key, width=22, show="*", font=("TkDefaultFont", BASE_FONT_SIZE - 1)
         )

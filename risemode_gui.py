@@ -523,9 +523,10 @@ class SettingsApp:
                 self._set_color_button(key, rgb)
         if self.game_mode_enabled.get():
             appid = pr.get_running_game_appid()
-            if appid and bg_path and os.path.dirname(bg_path) == pr.HERO_CACHE_DIR:
+            game_image_dirs = (pr.GRID_CACHE_DIR, pr.HERO_CACHE_DIR)
+            if appid and bg_path and os.path.dirname(bg_path) in game_image_dirs:
                 self.game_status_label.configure(
-                    text=f"Game detected (AppID {appid}) - showing its hero art"
+                    text=f"Game detected (AppID {appid}) - showing its cover art"
                 )
             else:
                 fallback = "custom image" if self.wp_mode.get() == "custom" else "desktop wallpaper"

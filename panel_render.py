@@ -49,6 +49,10 @@ BG_DIM_ALPHA = 140  # 0-255; darkens the wallpaper so stat text stays legible
 BG_FALLBACK = (15, 15, 25)
 
 STEAMGRIDDB_API_BASE = "https://www.steamgriddb.com/api/v2"
+# Grids (portrait, 600x900) suit the vertical orientation's tall panel;
+# heroes (wide, up to 3840x1240) suit horizontal's - see resolve_background_
+# path(), which picks between them based on the config's orientation.
+GRID_CACHE_DIR = os.path.expanduser("~/.cache/risemode-screen/grids")
 HERO_CACHE_DIR = os.path.expanduser("~/.cache/risemode-screen/heroes")
 HERO_4K_WIDTH = 3840  # SteamGridDB's "4K" hero dimension is 3840x1240,
                       # vs. 1920x620 for the standard size
@@ -59,14 +63,14 @@ GAME_DETECT_INTERVAL_S = 5  # how often to re-scan for a running Steam game -
 CONFIG_PATH = os.path.expanduser("~/.config/risemode-screen/config.json")
 # The base background is always one of these two - Game Mode isn't a third
 # alternative to them, it's an independent overlay (see GAME_MODE_LABEL)
-# that swaps in a hero image on top of whichever of these is picked, only while
-# a game is actually running.
+# that swaps in a grid/hero image on top of whichever of these is picked,
+# only while a game is actually running.
 BACKGROUND_MODES = ("desktop", "custom")
 BACKGROUND_MODE_LABELS = {
     "desktop": "Desktop wallpaper (auto-updates)",
     "custom": "Custom image",
 }
-GAME_MODE_LABEL = "Game Mode: show the running game's hero art instead"
+GAME_MODE_LABEL = "Game Mode"
 DEFAULT_SENSORS = {
     "cpu": True, "cpu_temp": True, "ram": True,
     "gpu": True, "gpu_temp": True, "gpu_vram": True, "gpu_power": True,
@@ -357,13 +361,18 @@ def get_running_game_appid():
     return _game_appid_cache["appid"]
 
 
-HERO_FETCH_RETRY_S = 30  # cooldown before retrying a failed fetch (bad/
-                         # missing key, no hero image, offline, ...) -
-                         # without this, "game" mode's per-second preview
-                         # refresh would hammer the API every tick while a
-                         # game is running and the fetch keeps failing
+GAME_IMAGE_FETCH_RETRY_S = 30  # cooldown before retrying a failed fetch
+                               # (bad/missing key, no image, offline, ...)
+                               # - without this, "game" mode's per-second
+                               # preview refresh would hammer the API every
+                               # tick while a game is running and the fetch
+                               # keeps failing
 
-_hero_fetch_failures = {}  # appid -> time of last failed attempt
+# Separate failure caches per image type/appid, not a shared one keyed by
+# appid alone - a grid-fetch failure shouldn't cool down a hero fetch for
+# the same game (they're independent SteamGridDB endpoints/results).
+_grid_fetch_failures = {}
+_hero_fetch_failures = {}
 
 _USER_AGENT = "risemode-smart-screen-driver/1.0"
 # Without a real User-Agent, urllib's default ("Python-urllib/x.y") gets
@@ -372,31 +381,31 @@ _USER_AGENT = "risemode-smart-screen-driver/1.0"
 # at all, before the request even reaches their API or CDN.
 
 
-def _fetch_game_hero_path(appid, api_key):
-    """Returns a local file path to the given Steam appid's best-rated hero
-    image (SteamGridDB's wide background art, preferring their 4K/3840x1240
-    size over the standard 1920x620 one when available), downloading and
-    caching it to disk on first use - hero art doesn't change, so every
+def _fetch_game_image(appid, api_key, *, endpoint, query, cache_dir, failures, rank_key):
+    """Shared fetch/cache logic behind _fetch_game_grid_path() and
+    _fetch_game_hero_path(): queries SteamGridDB's `endpoint` for `appid`,
+    picks the best entry per `rank_key`, and downloads it to `cache_dir` -
+    caching to disk on first use, since the art doesn't change, so every
     later call for the same game is just a cache hit, not a repeat
     API/network round-trip. Returns None on any failure (no API key
-    configured, no network, no hero art available for this game, ...) so
+    configured, no network, no image available for this game, ...) so
     callers can fall back cleanly to the base background instead."""
-    os.makedirs(HERO_CACHE_DIR, exist_ok=True)
+    os.makedirs(cache_dir, exist_ok=True)
     for ext in ("png", "jpg", "jpeg", "webp"):
-        cached = os.path.join(HERO_CACHE_DIR, f"{appid}.{ext}")
+        cached = os.path.join(cache_dir, f"{appid}.{ext}")
         if os.path.isfile(cached):
             return cached
     if not api_key:
         return None
-    last_failure = _hero_fetch_failures.get(appid)
-    if last_failure is not None and time.time() - last_failure < HERO_FETCH_RETRY_S:
+    last_failure = failures.get(appid)
+    if last_failure is not None and time.time() - last_failure < GAME_IMAGE_FETCH_RETRY_S:
         return None
 
     def _fail():
-        _hero_fetch_failures[appid] = time.time()
+        failures[appid] = time.time()
         return None
 
-    url = f"{STEAMGRIDDB_API_BASE}/heroes/steam/{appid}?types=static"
+    url = f"{STEAMGRIDDB_API_BASE}/{endpoint}/steam/{appid}?{query}"
     request = urllib.request.Request(url, headers={
         "Authorization": f"Bearer {api_key}",
         "User-Agent": _USER_AGENT,
@@ -407,18 +416,10 @@ def _fetch_game_hero_path(appid, api_key):
     except (urllib.error.URLError, OSError, ValueError):
         return _fail()
 
-    heroes = payload.get("data") or []
-    if not heroes:
+    items = payload.get("data") or []
+    if not items:
         return _fail()
-    # Prefer 4K art over the standard size regardless of score - only
-    # breaking ties by score (most-voted) within whichever size tier is
-    # actually available, since most entries carry a score of 0 anyway
-    # (SteamGridDB's voting is sparse) and a 4K image is the more
-    # meaningful "best" here.
-    best = max(
-        heroes,
-        key=lambda h: (h.get("width", 0) >= HERO_4K_WIDTH, h.get("score", 0)),
-    )
+    best = max(items, key=rank_key)
     image_url = best.get("url")
     if not image_url:
         return _fail()
@@ -426,7 +427,7 @@ def _fetch_game_hero_path(appid, api_key):
     ext = image_url.rsplit(".", 1)[-1].split("?")[0].lower()
     if ext not in ("png", "jpg", "jpeg", "webp"):
         ext = "png"
-    dest = os.path.join(HERO_CACHE_DIR, f"{appid}.{ext}")
+    dest = os.path.join(cache_dir, f"{appid}.{ext}")
     image_request = urllib.request.Request(image_url, headers={"User-Agent": _USER_AGENT})
     try:
         with urllib.request.urlopen(image_request, timeout=6) as resp:
@@ -438,6 +439,36 @@ def _fetch_game_hero_path(appid, api_key):
     return dest
 
 
+def _fetch_game_grid_path(appid, api_key):
+    """The given Steam appid's top-voted portrait grid (600x900) - fits
+    vertical orientation's tall panel far better than a wide hero image
+    would."""
+    return _fetch_game_image(
+        appid, api_key,
+        endpoint="grids", query="dimensions=600x900&types=static",
+        cache_dir=GRID_CACHE_DIR, failures=_grid_fetch_failures,
+        rank_key=lambda g: g.get("score", 0),  # most-voted
+    )
+
+
+def _fetch_game_hero_path(appid, api_key):
+    """The given Steam appid's best-rated hero image (SteamGridDB's wide
+    background art) - fits horizontal orientation's wide panel far better
+    than a portrait grid would. Prefers their 4K/3840x1240 size over the
+    standard 1920x620 one when available."""
+    return _fetch_game_image(
+        appid, api_key,
+        endpoint="heroes", query="types=static",
+        cache_dir=HERO_CACHE_DIR, failures=_hero_fetch_failures,
+        # Prefer 4K art over the standard size regardless of score - only
+        # breaking ties by score (most-voted) within whichever size tier
+        # is actually available, since most entries carry a score of 0
+        # anyway (SteamGridDB's voting is sparse) and a 4K image is the
+        # more meaningful "best" here.
+        rank_key=lambda h: (h.get("width", 0) >= HERO_4K_WIDTH, h.get("score", 0)),
+    )
+
+
 def resolve_background_path(config):
     """Figures out which image path load_background() should actually
     display. Starts from the base background_mode:
@@ -447,11 +478,13 @@ def resolve_background_path(config):
 
     Game Mode (game_mode_enabled) isn't a third alternative to those - it's
     an overlay on top of whichever base is picked, swapping in the
-    currently-running game's hero art only while a game is actually
-    detected and hero art for it is fetchable. The instant no game is
-    running (or no hero art could be fetched), this falls straight back
-    through to the base path above - so it's never stuck showing stale art
-    from a game that has since closed.
+    currently-running game's cover art only while a game is actually
+    detected and art for it is fetchable - a portrait grid image in
+    vertical orientation, a wide hero image in horizontal (each fits its
+    panel shape far better than the other would). The instant no game is
+    running (or no art could be fetched), this falls straight back through
+    to the base path above - so it's never stuck showing stale art from a
+    game that has since closed.
     """
     mode = config.get(
         "background_mode", "custom" if config.get("wallpaper") else "desktop"
@@ -461,9 +494,15 @@ def resolve_background_path(config):
     if config.get("game_mode_enabled"):
         appid = get_running_game_appid()
         if appid:
-            hero_path = _fetch_game_hero_path(appid, config.get("steamgriddb_api_key", ""))
-            if hero_path:
-                return hero_path
+            api_key = config.get("steamgriddb_api_key", "")
+            fetch = (
+                _fetch_game_hero_path
+                if config.get("orientation", "vertical") == "horizontal"
+                else _fetch_game_grid_path
+            )
+            image_path = fetch(appid, api_key)
+            if image_path:
+                return image_path
 
     return base_path
 

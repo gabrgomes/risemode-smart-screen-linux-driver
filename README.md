@@ -63,12 +63,12 @@ By default the panel background is your desktop wallpaper: read via `gsettings`,
 
 #### Game Mode
 
-An independent checkbox, not a third alternative to desktop/custom above: while enabled, it overlays a game's hero art on top of whichever background you picked (desktop wallpaper or a custom image) only while that game is actually running, and falls straight back to that base background the moment it closes. Turning it off, or having no game running, is exactly the same as if it didn't exist.
+An independent checkbox, not a third alternative to desktop/custom above: while enabled, it overlays a game's cover art on top of whichever background you picked (desktop wallpaper or a custom image) only while that game is actually running, and falls straight back to that base background the moment it closes. Turning it off, or having no game running, is exactly the same as if it didn't exist.
 
 - Requires a free SteamGridDB API key ([steamgriddb.com/profile/preferences](https://www.steamgriddb.com/profile/preferences)), entered in the settings GUI once Game Mode is checked.
 - Detection is via the `SteamAppId` environment variable Steam sets on every game process it launches (`get_running_game_appid()` in `panel_render.py`, throttled to a re-scan every `GAME_DETECT_INTERVAL_S`, currently 5s) — this only catches games actually launched through Steam (including Proton), not non-Steam executables.
-- The hero art is that game's best-rated wide background art on [SteamGridDB](https://www.steamgriddb.com/) — their 4K (3840x1240) size is always preferred over the standard 1920x620 one when available, with score (upvotes) only breaking ties within whichever size is actually available (`_fetch_game_hero_path()`). It's downloaded once per game and cached to `~/.cache/risemode-screen/heroes/`, so switching between already-played games is instant and doesn't re-hit the API. A failed fetch (bad/missing key, no hero art for that game, offline) is cached too, for `HERO_FETCH_RETRY_S` (30s), so a persistent failure doesn't get retried every frame.
-- If no game is currently running (or no hero art could be fetched), the panel just shows the base background - so it never gets stuck on stale art.
+- Which SteamGridDB image type it fetches depends on [orientation](#orientation) - each fits its panel shape far better than the other would: a top-voted portrait grid (600x900, `_fetch_game_grid_path()`) in vertical, or the best-rated wide hero image (their 4K/3840x1240 size preferred over the standard 1920x620 one when available, `_fetch_game_hero_path()`) in horizontal. Both are downloaded once per game and cached separately (`~/.cache/risemode-screen/grids/`, `~/.cache/risemode-screen/heroes/`), so switching between already-played games - or between orientations - is instant and doesn't re-hit the API. A failed fetch (bad/missing key, no image of that type for that game, offline) is cached too, for `GAME_IMAGE_FETCH_RETRY_S` (30s), so a persistent failure doesn't get retried every frame.
+- If no game is currently running (or no cover art could be fetched), the panel just shows the base background - so it never gets stuck on stale art.
 
 ### Orientation
 
@@ -126,7 +126,7 @@ python3 -m venv venv
 ./venv/bin/python3 risemode_gui.py
 ```
 
-Lets you pick a background image (the live desktop wallpaper or a custom file, optionally overlaid by [Game Mode](#game-mode)'s auto hero art while a game is running), an [orientation](#orientation), and toggle which sensors are shown, and recolor the panel, with a live preview of exactly what the panel would render. **Apply** just writes `~/.config/risemode-screen/config.json` — the running `risemode-screen` service picks it up on its very next frame (`get_config()` in `panel_render.py` is cached by mtime and reloads automatically), no restart needed.
+Lets you pick a background image (the live desktop wallpaper or a custom file, optionally overlaid by [Game Mode](#game-mode)'s auto cover art while a game is running), an [orientation](#orientation), and toggle which sensors are shown, and recolor the panel, with a live preview of exactly what the panel would render. **Apply** just writes `~/.config/risemode-screen/config.json` — the running `risemode-screen` service picks it up on its very next frame (`get_config()` in `panel_render.py` is cached by mtime and reloads automatically), no restart needed.
 
 Every sensor block draws through the same 4 color roles (`panel_render.DEFAULT_COLORS`) rather than each having its own: **Labels** (e.g. "CPU", "GPU"), **Values** (the big numbers, and the clock's time), **Secondary readings** (temps, VRAM, power, and the clock's date), and the **Separator line** above the FPS/frame time section. Two color modes, picked with a combobox in the GUI's Colors section:
 

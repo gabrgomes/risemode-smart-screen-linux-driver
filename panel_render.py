@@ -1039,9 +1039,13 @@ def _render_vertical(img, draw, canvas_w, canvas_h, sensors, cpu, mem, cpu_temp,
 
     if sensors.get("clock", True):
         y = canvas_h - 140
-        draw.text((20, y), time.strftime("%H:%M:%S"), font=FONT_BIG, fill=value_color)
-        y += 70
-        draw.text((20, y), time.strftime("%d-%m-%Y"), font=FONT_DATE, fill=secondary_color)
+        for text, font, fill in (
+            (time.strftime("%H:%M:%S"), FONT_BIG, value_color),
+            (time.strftime("%d-%m-%Y"), FONT_DATE, secondary_color),
+        ):
+            tw = draw.textlength(text, font=font)
+            draw.text(((canvas_w - tw) / 2, y), text, font=font, fill=fill)
+            y += 70
 
 
 def _draw_column(draw, x0, col_width, canvas_h, label, value_text, secondary_text, colors):

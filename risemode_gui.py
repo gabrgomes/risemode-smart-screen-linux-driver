@@ -280,6 +280,9 @@ class SettingsApp:
         # is just a separate LabelFrame, not a separate var dict (assigning
         # self.sensor_vars = {} per group would drop every switch but the
         # last group's, so their toggles would no longer reach the config).
+        self.mangohud_when_active_only = tk.BooleanVar(
+            value=config.get("mangohud_when_active_only", False)
+        )
         self.sensor_vars = {}
         for title, labels in (
             ("Sensors", pr.SENSOR_LABELS),
@@ -288,6 +291,12 @@ class SettingsApp:
         ):
             group = ttk.LabelFrame(controls, text=title, padding=SECTION_PADDING)
             group.pack(fill="x", pady=(0, SECTION_GAP))
+            if title == "MangoHud Sensors":
+                opt = ttk.Frame(group)
+                opt.pack(fill="x", pady=(0, 6))
+                ttk.Label(opt, text="Only while a game is running").pack(side="left")
+                Switch(opt, variable=self.mangohud_when_active_only,
+                       height=self._switch_height).pack(side="right")
             for key, label in labels.items():
                 var = tk.BooleanVar(value=config["sensors"].get(key, True))
                 self.sensor_vars[key] = var
@@ -476,6 +485,7 @@ class SettingsApp:
             "colors": {k: list(v) for k, v in self.colors.items()},
             "color_mode": self.color_mode.get(),
             "orientation": self.orientation.get(),
+            "mangohud_when_active_only": self.mangohud_when_active_only.get(),
         }
 
     def _apply(self):

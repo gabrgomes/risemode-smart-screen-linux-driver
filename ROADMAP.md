@@ -74,7 +74,7 @@ v1 shipped (see Shipped § Now playing). Remaining:
 
 ## Backlog / ideas
 - 💡 Use system fonts
-- 💡 Only show fps related info when game is detected
+- [x] Only show FPS-related info when a game is detected — "Only while a game is running" toggle in the MangoHud Sensors section
 - 💡 Integrate with OpenRGB - Change profile/send colors
 - 💡 Improve UI
 - 💡 Find a way to generate vertical images for games

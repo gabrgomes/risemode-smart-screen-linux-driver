@@ -175,6 +175,7 @@ def load_config():
         "colors": colors,
         "color_mode": color_mode,
         "orientation": orientation,
+        "mangohud_when_active_only": bool(data.get("mangohud_when_active_only", False)),
     }
 
 
@@ -1179,6 +1180,10 @@ def render_stats_pil(config=None):
     canvas_size = CANVAS_SIZES[orientation]
 
     game_stats = get_game_stats()
+    if config.get("mangohud_when_active_only") and not game_stats:
+        # nothing logging right now - drop the MangoHud rows entirely for
+        # this frame rather than showing them as "--"
+        sensors = {**sensors, "fps": False, "fps_low1": False, "frametime": False}
     fps = game_stats.get("fps")
     frametime = game_stats.get("frametime")
     if fps is None:

@@ -93,6 +93,8 @@ An optional "Now playing" sensor — a widget with the current track's album art
 
 The FPS/1% low/frame time shown on the panel are the *real*, live values for whatever game/GL app is currently running, read from MangoHud's own CSV logging — not the driver's own frame-send rate. `get_game_stats()` in `panel_render.py` tails the newest non-summary CSV in `~/.local/share/mangohud_logs` and parses the whole latest row (keyed by MangoHud's own column names, whose order isn't hardcoded since it depends on MangoHud's config/version) rather than just pulling out FPS, so any other column MangoHud logs (`cpu_load`, `gpu_vram_used`, `swap_used`, ...) is available the same way if you want to wire up more sensors later.
 
+By default the FPS/1% low/frame time rows show `--` when nothing is logging. The settings GUI's "Only while a game is running" toggle (in the MangoHud Sensors section) hides those rows — and the separator line above them — entirely whenever MangoHud isn't producing data.
+
 ```
 sudo apt install mangohud
 ```

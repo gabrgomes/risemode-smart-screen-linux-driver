@@ -387,7 +387,7 @@ def _font(size):
         f = _font_cache[size] = load_font(size)
     return f
 
-FONT_DATE = load_font(54)
+FONT_DATE = load_font(38)
 FONT_BIG = load_font(64)
 FONT_MED = load_font(36)
 

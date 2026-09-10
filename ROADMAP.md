@@ -25,7 +25,8 @@ Legend: `[x]` done · `[ ]` planned · 💡 idea / maybe
 - [x] Data via MPRIS through one throttled `playerctl metadata` call (`get_music_info()`)
 - [x] Album art — `file://` used directly, `http(s)://` downloaded + disk-cached (`~/.cache/risemode-screen/art/`, pruned to 200 files), note-glyph placeholder when missing
 - [x] Progress bar interpolated between the 1s metadata polls
-- [x] Fits both layouts — above the clock in vertical, a full-width bottom strip in horizontal
+- [x] Two layouts — a large centered thumbnail (~½ panel width) over centered title/artist above the clock in vertical; a small-thumbnail full-width strip along the bottom in horizontal (stat columns center in the space above it)
+- [x] Title and artist share one font size, distinguished by colour
 - [x] `install.sh` prompts for `playerctl`; README section
 
 ### Background

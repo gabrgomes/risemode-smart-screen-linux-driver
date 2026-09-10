@@ -898,8 +898,7 @@ def _draw_music_block(img, draw, box, art_path, title, artist, progress, colors,
         img.paste(thumb, (x + (w - art_size) // 2, y), mask)
 
         cy = y + art_size + round(w * 0.05)
-        title_font = _font(round(w * 0.115))
-        artist_font = _font(round(w * 0.083))
+        title_font = artist_font = _font(round(w * 0.083))
         title_line = _ellipsize(draw, title, title_font, w)
         artist_line = _ellipsize(draw, artist, artist_font, w)
 
@@ -926,8 +925,7 @@ def _draw_music_block(img, draw, box, art_path, title, artist, progress, colors,
 
     text_x = art_x + art_size + round(h * 0.10)
     text_w = max(1, x + w - pad - text_x)
-    title_font = _font(round(h * 0.26))
-    artist_font = _font(round(h * 0.19))
+    title_font = artist_font = _font(round(h * 0.19))
     title_line = _ellipsize(draw, title, title_font, text_w)
     artist_line = _ellipsize(draw, artist, artist_font, text_w)
 

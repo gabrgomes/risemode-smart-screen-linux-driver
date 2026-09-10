@@ -21,7 +21,13 @@ PREVIEW_HEIGHT = 900  # initial size; the preview pane resizes with the window
 PREVIEW_WIDTH = round(pr.WIDTH * PREVIEW_HEIGHT / pr.HEIGHT)
 PREVIEW_REFRESH_MS = 1000
 BASE_FONT_SIZE = 13
-FRAME_PADDING = 18
+FRAME_PADDING = 18   # controls' own outer inset, and the margin Live
+                     # preview gets to line its own border up with the
+                     # other sections' in horizontal mode (see below)
+SECTION_PADDING = 12  # every section LabelFrame's internal border-to-
+                      # content padding (Display, Background, Sensors,
+                      # Colors, Live preview) - kept as one constant so
+                      # they can't drift out of sync with each other
 
 # Matches install.sh's StartupWMClass= so a dock/taskbar can associate the
 # running window with the .desktop entry (and its icon) instead of falling
@@ -101,14 +107,15 @@ class SettingsApp:
 
         config = pr.get_config()
 
-        controls = ttk.Frame(root, padding=18)
+        controls = ttk.Frame(root, padding=FRAME_PADDING)
         self.controls = controls
 
         # A LabelFrame, not a plain Frame, so it carries the same bordered,
         # titled look as Display/Background/Sensors/Colors - it was a bare
         # heading + image before, visually lighter-weight than every other
-        # section.
-        preview_frame = ttk.LabelFrame(root, text="Live preview", padding=FRAME_PADDING)
+        # section. padding=SECTION_PADDING (not FRAME_PADDING) so its
+        # border-to-content inset matches every other section's exactly.
+        preview_frame = ttk.LabelFrame(root, text="Live preview", padding=SECTION_PADDING)
         preview_frame.columnconfigure(0, weight=1)
         preview_frame.rowconfigure(0, weight=1)
         self._preview_frame = preview_frame
@@ -127,7 +134,7 @@ class SettingsApp:
         # --- Display --- (first: orientation affects every other section's
         # layout, including where the preview itself ends up - see
         # _apply_layout_mode())
-        display_frame = ttk.LabelFrame(controls, text="Display", padding=12)
+        display_frame = ttk.LabelFrame(controls, text="Display", padding=SECTION_PADDING)
         display_frame.pack(fill="x", pady=(0, 16))
 
         self.orientation = tk.StringVar(value=config.get("orientation", "vertical"))
@@ -144,7 +151,7 @@ class SettingsApp:
         self.orientation_combo.bind("<<ComboboxSelected>>", self._on_orientation_selected)
 
         # --- Background ---
-        wp_frame = ttk.LabelFrame(controls, text="Background", padding=12)
+        wp_frame = ttk.LabelFrame(controls, text="Background", padding=SECTION_PADDING)
         wp_frame.pack(fill="x", pady=(0, 16))
 
         self.wp_mode = tk.StringVar(value=config["background_mode"])
@@ -205,7 +212,7 @@ class SettingsApp:
         self._sync_wp_state()
 
         # --- Sensors ---
-        sensors_frame = ttk.LabelFrame(controls, text="Sensors", padding=12)
+        sensors_frame = ttk.LabelFrame(controls, text="Sensors", padding=SECTION_PADDING)
         sensors_frame.pack(fill="x", pady=(0, 16))
 
         self.sensor_vars = {}
@@ -218,7 +225,7 @@ class SettingsApp:
             Switch(row, variable=var).pack(side="right")
 
         # --- Colors ---
-        colors_frame = ttk.LabelFrame(controls, text="Colors", padding=12)
+        colors_frame = ttk.LabelFrame(controls, text="Colors", padding=SECTION_PADDING)
         colors_frame.pack(fill="x", pady=(0, 16))
 
         self.color_mode = tk.StringVar(value=config.get("color_mode", "custom"))
@@ -286,7 +293,16 @@ class SettingsApp:
             # beside it exactly where the vertical layout's preview column
             # used to be.
             self.controls.grid(row=0, column=0, sticky="new")
-            self._preview_frame.grid(row=1, column=0, sticky="nsew")
+            # padx matches controls' own padding, so Live preview's border
+            # lines up with Display/Background/Sensors/Colors' borders
+            # exactly instead of running flush to the window edges while
+            # theirs sit inset inside controls' padding. pady's bottom
+            # value mirrors that same inset at the window's bottom edge -
+            # the top side needs none, controls' own bottom padding after
+            # the Colors section already provides that gap.
+            self._preview_frame.grid(
+                row=1, column=0, sticky="nsew", padx=FRAME_PADDING, pady=(0, FRAME_PADDING)
+            )
             self.root.columnconfigure(0, weight=1)
             self.root.columnconfigure(1, weight=0)
             self.root.rowconfigure(0, weight=0)

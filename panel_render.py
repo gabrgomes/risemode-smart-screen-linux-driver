@@ -1001,7 +1001,6 @@ def _render_vertical(img, draw, canvas_w, canvas_h, sensors, cpu, mem, cpu_temp,
     bottom regardless of what's above them."""
     label_color = tuple(colors["label"])
     value_color = tuple(colors["value"])
-    secondary_color = tuple(colors["secondary"])
     separator_color = tuple(colors["separator"])
 
     y = 40
@@ -1062,7 +1061,7 @@ def _render_vertical(img, draw, canvas_w, canvas_h, sensors, cpu, mem, cpu_temp,
         y = canvas_h - 140
         for text, font, fill in (
             (time.strftime("%H:%M:%S"), FONT_BIG, value_color),
-            (time.strftime("%d/%m/%Y"), FONT_DATE, secondary_color),
+            (time.strftime("%d/%m/%Y"), FONT_DATE, label_color),
         ):
             tw = draw.textlength(text, font=font)
             draw.text(((canvas_w - tw) / 2, y), text, font=font, fill=fill)

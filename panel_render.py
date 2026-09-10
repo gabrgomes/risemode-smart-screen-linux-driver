@@ -1039,7 +1039,7 @@ def _render_vertical(img, draw, canvas_w, canvas_h, sensors, cpu, mem, cpu_temp,
         y = canvas_h - 140
         for text, font, fill in (
             (time.strftime("%H:%M:%S"), FONT_BIG, value_color),
-            (time.strftime("%d-%m-%Y"), FONT_DATE, secondary_color),
+            (time.strftime("%d/%m/%Y"), FONT_DATE, secondary_color),
         ):
             tw = draw.textlength(text, font=font)
             draw.text(((canvas_w - tw) / 2, y), text, font=font, fill=fill)
@@ -1110,7 +1110,7 @@ def _render_horizontal(img, draw, canvas_w, canvas_h, sensors, cpu, mem, cpu_tem
     if sensors.get("frametime", True):
         game_cols.append(("FRAME TIME", f"{frametime:.1f}ms" if frametime is not None else "--", None))
     if sensors.get("clock", True):
-        game_cols.append((None, time.strftime("%H:%M:%S"), time.strftime("%d-%m-%Y")))
+        game_cols.append((None, time.strftime("%H:%M:%S"), time.strftime("%d/%m/%Y")))
 
     columns = system_cols + game_cols
     if columns:

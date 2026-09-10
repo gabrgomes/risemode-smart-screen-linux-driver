@@ -168,14 +168,14 @@ class SettingsApp:
         # --- Display --- (first: orientation affects every other section's
         # layout, including where the preview itself ends up - see
         # _apply_layout_mode())
-        display_frame = ttk.LabelFrame(controls, text="Display", padding=SECTION_PADDING)
+        display_frame = ttk.LabelFrame(controls, text="Display Orientation", padding=SECTION_PADDING)
         display_frame.pack(fill="x", pady=(0, SECTION_GAP))
 
         self.orientation = tk.StringVar(value=config.get("orientation", "vertical"))
         self._orientation_by_label = {v: k for k, v in pr.ORIENTATION_LABELS.items()}
         orientation_row = ttk.Frame(display_frame)
         orientation_row.pack(fill="x")
-        ttk.Label(orientation_row, text="Orientation:").pack(side="left")
+        ttk.Label(orientation_row).pack(side="left")
         self.orientation_combo = ttk.Combobox(
             orientation_row, values=list(pr.ORIENTATION_LABELS.values()),
             state="readonly", width=22,
@@ -246,19 +246,6 @@ class SettingsApp:
 
         self._sync_wp_state()
 
-        # --- Sensors ---
-        sensors_frame = ttk.LabelFrame(controls, text="Sensors", padding=SECTION_PADDING)
-        sensors_frame.pack(fill="x", pady=(0, SECTION_GAP))
-
-        self.sensor_vars = {}
-        for key, label in pr.SENSOR_LABELS.items():
-            var = tk.BooleanVar(value=config["sensors"].get(key, True))
-            self.sensor_vars[key] = var
-            row = ttk.Frame(sensors_frame)
-            row.pack(fill="x", pady=3)
-            ttk.Label(row, text=label).pack(side="left")
-            Switch(row, variable=var, height=self._switch_height).pack(side="right")
-
         # --- Colors ---
         colors_frame = ttk.LabelFrame(controls, text="Colors", padding=SECTION_PADDING)
         colors_frame.pack(fill="x", pady=(0, SECTION_GAP))
@@ -287,6 +274,27 @@ class SettingsApp:
             btn.pack(side="left")
             self.color_buttons[key] = btn
         self._sync_color_mode_state()
+
+        # --- Sensors / MangoHud Sensors / Extra Features ---
+        # One shared self.sensor_vars across all three groups - each group
+        # is just a separate LabelFrame, not a separate var dict (assigning
+        # self.sensor_vars = {} per group would drop every switch but the
+        # last group's, so their toggles would no longer reach the config).
+        self.sensor_vars = {}
+        for title, labels in (
+            ("Sensors", pr.SENSOR_LABELS),
+            ("MangoHud Sensors", pr.MHSENSOR_LABELS),
+            ("Extra Features", pr.EXTRA_LABELS),
+        ):
+            group = ttk.LabelFrame(controls, text=title, padding=SECTION_PADDING)
+            group.pack(fill="x", pady=(0, SECTION_GAP))
+            for key, label in labels.items():
+                var = tk.BooleanVar(value=config["sensors"].get(key, True))
+                self.sensor_vars[key] = var
+                row = ttk.Frame(group)
+                row.pack(fill="x", pady=3)
+                ttk.Label(row, text=label).pack(side="left")
+                Switch(row, variable=var, height=self._switch_height).pack(side="right")
 
         # --- Preview --- (the section's own title comes from the
         # LabelFrame itself now, not a separate heading widget)

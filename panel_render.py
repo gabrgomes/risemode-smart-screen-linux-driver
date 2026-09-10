@@ -82,7 +82,7 @@ GAME_MODE_LABEL = "Game Mode"
 DEFAULT_SENSORS = {
     "cpu": True, "cpu_temp": True, "ram": True,
     "gpu": True, "gpu_temp": True, "gpu_vram": True, "gpu_power": True,
-    "fps": True, "frametime": True,
+    "fps": True, "fps_low1": True, "frametime": True,
     "clock": True,
     "music": True,
 }
@@ -94,10 +94,17 @@ SENSOR_LABELS = {
     "gpu_temp": "GPU temperature",
     "gpu_vram": "GPU VRAM usage",
     "gpu_power": "GPU power draw",
-    "fps": "FPS / 1% low",
+}
+
+MHSENSOR_LABELS = {
+    "fps": "FPS",
+    "fps_low1": "1% low",
     "frametime": "Frame time (stutter)",
-    "clock": "Clock / date",
+}
+
+EXTRA_LABELS = {
     "music": "Now playing",
+    "clock": "Clock / date",
 }
 
 # The whole panel draws through just 4 color roles - every sensor block
@@ -979,16 +986,15 @@ def _draw_device_block(draw, y, label, value_text, secondary_parts, colors):
     the same one anyway); pass [] for none."""
     draw.text((20, y), label, font=FONT_MED, fill=tuple(colors["label"]))
     y += 44
-    draw.text((20, y), value_text, font=FONT_BIG, fill=tuple(colors["value"]))
+    if value_text is not None:  # None = usage toggle off, temp/etc. still on
+        draw.text((20, y), value_text, font=FONT_BIG, fill=tuple(colors["value"]))
+        y += 70 if secondary_parts else 90
     if secondary_parts:
-        y += 70
         x = 20
         for text in secondary_parts:
             draw.text((x, y), text, font=FONT_MED, fill=tuple(colors["secondary"]))
             x += draw.textlength(text, font=FONT_MED) + 24
         y += 60
-    else:
-        y += 90
     return y
 
 
@@ -1004,11 +1010,12 @@ def _render_vertical(img, draw, canvas_w, canvas_h, sensors, cpu, mem, cpu_temp,
     separator_color = tuple(colors["separator"])
 
     y = 40
-    if sensors.get("cpu", True):
+    if sensors.get("cpu", True) or sensors.get("cpu_temp", True):
+        primary = f"{cpu:.0f}%" if sensors.get("cpu", True) else None
         secondary = []
         if sensors.get("cpu_temp", True) and cpu_temp is not None:
             secondary.append(f"{cpu_temp:.0f}°C")
-        y = _draw_device_block(draw, y, "CPU", f"{cpu:.0f}%", secondary, colors)
+        y = _draw_device_block(draw, y, "CPU", primary, secondary, colors)
 
     if sensors.get("ram", True):
         y = _draw_device_block(draw, y, "RAM", f"{mem:.0f}%", [], colors)
@@ -1034,6 +1041,7 @@ def _render_vertical(img, draw, canvas_w, canvas_h, sensors, cpu, mem, cpu_temp,
         draw.text((20, y), f"{fps:.1f}" if fps is not None else "--", font=FONT_BIG, fill=value_color)
         y += 90
 
+    if sensors.get("fps_low1", True):
         draw.text((20, y), "1% LOW", font=FONT_MED, fill=label_color)
         y += 44
         draw.text((20, y), f"{fps_low1:.1f}" if fps_low1 is not None else "--", font=FONT_BIG, fill=value_color)
@@ -1128,6 +1136,7 @@ def _render_horizontal(img, draw, canvas_w, canvas_h, sensors, cpu, mem, cpu_tem
     game_cols = []
     if sensors.get("fps", True):
         game_cols.append(("FPS", f"{fps:.1f}" if fps is not None else "--", None))
+    if sensors.get("fps_low1", True):
         game_cols.append(("1% LOW", f"{fps_low1:.1f}" if fps_low1 is not None else "--", None))
     if sensors.get("frametime", True):
         game_cols.append(("FRAME TIME", f"{frametime:.1f}ms" if frametime is not None else "--", None))

@@ -19,7 +19,8 @@ import panel_render as pr
 
 PREVIEW_HEIGHT = 900  # initial size; the preview pane resizes with the window
 PREVIEW_WIDTH = round(pr.WIDTH * PREVIEW_HEIGHT / pr.HEIGHT)
-PREVIEW_REFRESH_MS = 1000
+PREVIEW_REFRESH_MS = 250  # low enough for the marquee scroll and the clock
+                          # seconds to look live in the preview
 BASE_FONT_SIZE = 13
 FRAME_PADDING = 18   # controls' own outer inset, and the margin Live
                      # preview gets to line its own border up with the

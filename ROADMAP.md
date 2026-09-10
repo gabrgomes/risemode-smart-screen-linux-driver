@@ -65,7 +65,7 @@ Legend: `[x]` done · `[ ]` planned · 💡 idea / maybe
 
 v1 shipped (see Shipped § Now playing). Remaining:
 - [ ] 💡 Dynamic tint — color the widget from the art's dominant color (reuse `_compute_auto_colors`)
-- [ ] 💡 Marquee scroll for long titles (needs per-frame scroll state; render loop is ~6fps so it may be choppy) — v1 ellipsis-truncates
+- [x] Marquee scroll for long titles — continuous left-scroll loop with a blank gap, clipped to the line window; short text stays static (centered in vertical). Wall-clock paced (~55px/s). GUI preview refresh bumped to 250ms so it looks live there too.
 - [ ] 💡 CJK / emoji font fallback (Noto Sans) — PIL does no automatic font fallback; non-Latin track names currently render as tofu
 - [ ] 💡 "Show while paused" option (v1 shows it while playing *or* paused)
 - [ ] 💡 Move the `playerctl` call + art fetch off the render thread (first fetch of a new track's remote art can block up to ~6s)

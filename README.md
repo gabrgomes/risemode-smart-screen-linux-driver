@@ -87,7 +87,7 @@ An optional "Now playing" sensor — a widget with the current track's album art
 - Data comes from MPRIS via one throttled `playerctl metadata` call (`get_music_info()` in `panel_render.py`, re-run at most once a second). Works with any MPRIS player — Spotify, VLC, mpv, Rhythmbox, and Chromium/Firefox web audio (YouTube, YT Music, Spotify Web, ...).
 - Album art from `mpris:artUrl`: `file://` URLs are used directly, `http(s)://` ones are downloaded once and cached to `~/.cache/risemode-screen/art/` keyed by URL hash (pruned to the 200 most-recent files, since art churns per-track). Missing/unfetchable art falls back to a plain note-glyph placeholder.
 - The progress bar advances smoothly between the 1s metadata refreshes by adding the wall time elapsed since the last poll to the reported position.
-- Long titles/artists are ellipsis-truncated. A marquee scroll, dominant-colour tinting from the art, and CJK/emoji font fallback are on the [roadmap](ROADMAP.md) but not in this version — non-Latin scripts and emoji in track names currently render as tofu (the panel font is DejaVu Sans).
+- Titles/artists too long for their line marquee-scroll (a continuous left loop with a blank gap between the wrapping copies, clipped to the line, wall-clock paced so the speed is frame-rate independent); shorter text stays static. Dominant-colour tinting from the art and CJK/emoji font fallback are on the [roadmap](ROADMAP.md) but not in this version — non-Latin scripts and emoji in track names currently render as tofu (the panel font is DejaVu Sans).
 
 ### GPU FPS via MangoHud
 

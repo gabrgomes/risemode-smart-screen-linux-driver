@@ -822,22 +822,55 @@ def load_background(wallpaper_override=None, canvas_size=(WIDTH, HEIGHT)):
 _fps_history = deque(maxlen=200)
 
 
-def _ellipsize(draw, text, font, max_width):
-    """Trims `text` to fit `max_width`, appending an ellipsis if it had to
-    cut anything. Binary search over the cut point rather than measuring one
-    character at a time."""
+_marquee_state = {}  # (text, font id, window width) -> {"off": px, "t": last-drawn time}
+MARQUEE_SPEED_PX_S = 55  # scroll rate, wall-clock based so it looks the same
+                         # regardless of the actual render frame rate
+
+
+def _line_height(draw, text, font):
+    """(pixel height, top offset) of one line - the top offset is what to
+    subtract from a baseline y so the glyph tops sit flush at it."""
+    bb = draw.textbbox((0, 0), text or "X", font=font)
+    return bb[3] - bb[1], bb[1]
+
+
+def _draw_text_line(img, draw, x, y_top, w, text, font, fill, align="left"):
+    """One line of text in the window (x, y_top)..(x+w, y_top+height). If it
+    fits it's drawn statically (align "left" or "center"); if it's wider
+    than the window it scrolls left in a continuous loop with a blank gap
+    between the wrapping copies, clipped to the window. Returns the line's
+    pixel height."""
     text = " ".join(text.split())
-    if not text or draw.textlength(text, font=font) <= max_width:
-        return text
-    ell = "…"
-    lo, hi = 0, len(text)
-    while lo < hi:
-        mid = (lo + hi + 1) // 2
-        if draw.textlength(text[:mid].rstrip() + ell, font=font) <= max_width:
-            lo = mid
-        else:
-            hi = mid - 1
-    return (text[:lo].rstrip() + ell) if lo else ell
+    line_h, top = _line_height(draw, text, font)
+    if not text:
+        return line_h
+    tw = draw.textlength(text, font=font)
+    if tw <= w:
+        tx = x + (w - tw) / 2 if align == "center" else x
+        draw.text((tx, y_top - top), text, font=font, fill=fill)
+        return line_h
+
+    gap = max(60, round(w * 0.35))
+    period = tw + gap
+    now = time.time()
+    key = (text, id(font), int(w))
+    st = _marquee_state.get(key)
+    if st is None:
+        if len(_marquee_state) > 24:  # drop entries not drawn in the last 5s
+            for k in [k for k, v in _marquee_state.items() if now - v["t"] > 5]:
+                _marquee_state.pop(k, None)
+        st = _marquee_state[key] = {"off": 0.0, "t": now}
+    st["off"] = (st["off"] + (now - st["t"]) * MARQUEE_SPEED_PX_S) % period
+    st["t"] = now
+    off = st["off"]
+
+    x0, y0, wi = int(x), int(y_top), int(w)
+    region = img.crop((x0, y0, x0 + wi, y0 + line_h))
+    rdraw = ImageDraw.Draw(region)
+    for start in (-off, period - off):
+        rdraw.text((start, -top), text, font=font, fill=fill)
+    img.paste(region, (x0, y0))
+    return line_h
 
 
 def _prep_thumb(art_path, size, colors):
@@ -887,10 +920,13 @@ def _draw_music_block(img, draw, box, art_path, title, artist, progress, colors,
     progress bar below it - sizes scale off the box's width, since text
     there gets the whole width rather than a cramped strip beside the art.
 
-    `art_path` None draws a note-glyph placeholder either way."""
+    Title/artist that don't fit their line marquee-scroll (see
+    _draw_text_line). `art_path` None draws a note-glyph placeholder."""
     x, y, w, h = box
     title = title or "Unknown"
     artist = artist or ""
+    value = tuple(colors["value"])
+    secondary = tuple(colors["secondary"])
 
     if stacked:
         art_size = round(w * 0.55)
@@ -898,21 +934,12 @@ def _draw_music_block(img, draw, box, art_path, title, artist, progress, colors,
         img.paste(thumb, (x + (w - art_size) // 2, y), mask)
 
         cy = y + art_size + round(w * 0.05)
-        title_font = artist_font = _font(round(w * 0.083))
-        title_line = _ellipsize(draw, title, title_font, w)
-        artist_line = _ellipsize(draw, artist, artist_font, w)
-
-        tb = draw.textbbox((0, 0), title_line, font=title_font)
-        tw = draw.textlength(title_line, font=title_font)
-        draw.text((x + (w - tw) / 2, cy - tb[1]), title_line,
-                  font=title_font, fill=tuple(colors["value"]))
-        cy += (tb[3] - tb[1]) + round(w * 0.03)
-        if artist_line:
-            ab = draw.textbbox((0, 0), artist_line, font=artist_font)
-            aw = draw.textlength(artist_line, font=artist_font)
-            draw.text((x + (w - aw) / 2, cy - ab[1]), artist_line,
-                      font=artist_font, fill=tuple(colors["secondary"]))
-            cy += (ab[3] - ab[1]) + round(w * 0.045)
+        line_font = _font(round(w * 0.083))
+        cy += _draw_text_line(img, draw, x, cy, w, title, line_font, value, align="center")
+        cy += round(w * 0.03)
+        if artist:
+            cy += _draw_text_line(img, draw, x, cy, w, artist, line_font, secondary, align="center")
+            cy += round(w * 0.045)
         if progress is not None:
             _draw_progress_bar(draw, x, cy, w, max(3, round(w * 0.016)), progress, colors)
         return
@@ -925,23 +952,19 @@ def _draw_music_block(img, draw, box, art_path, title, artist, progress, colors,
 
     text_x = art_x + art_size + round(h * 0.10)
     text_w = max(1, x + w - pad - text_x)
-    title_font = artist_font = _font(round(h * 0.19))
-    title_line = _ellipsize(draw, title, title_font, text_w)
-    artist_line = _ellipsize(draw, artist, artist_font, text_w)
-
-    tb = draw.textbbox((0, 0), title_line or "X", font=title_font)
-    ab = draw.textbbox((0, 0), artist_line or "X", font=artist_font)
+    line_font = _font(round(h * 0.19))
+    th, _ = _line_height(draw, title, line_font)
+    ah = _line_height(draw, artist, line_font)[0] if artist else 0
     line_gap = round(h * 0.09)
     bar_h = max(3, round(h * 0.05))
-    block_h = (tb[3] - tb[1]) + line_gap + (ab[3] - ab[1]) + line_gap + bar_h
+    block_h = th + line_gap + (ah + line_gap if artist else 0) + bar_h
     cy = y + (h - block_h) / 2
 
-    draw.text((text_x, cy - tb[1]), title_line, font=title_font, fill=tuple(colors["value"]))
-    cy += (tb[3] - tb[1]) + line_gap
-    if artist_line:
-        draw.text((text_x, cy - ab[1]), artist_line, font=artist_font,
-                  fill=tuple(colors["secondary"]))
-    cy += (ab[3] - ab[1]) + line_gap
+    _draw_text_line(img, draw, text_x, cy, text_w, title, line_font, value)
+    cy += th + line_gap
+    if artist:
+        _draw_text_line(img, draw, text_x, cy, text_w, artist, line_font, secondary)
+        cy += ah + line_gap
     if progress is not None:
         _draw_progress_bar(draw, text_x, cy, text_w, bar_h, progress, colors)
 

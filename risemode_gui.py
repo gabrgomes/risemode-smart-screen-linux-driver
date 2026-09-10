@@ -107,7 +107,13 @@ class SettingsApp:
 
         config = pr.get_config()
 
-        controls = ttk.Frame(root, padding=FRAME_PADDING)
+        # No bottom padding: each section already ends with its own
+        # pady=(0, 16) below it (see Display/Background/Sensors/Colors),
+        # so a padded bottom here would stack an extra FRAME_PADDING on
+        # top of that just for the last one (Colors) - inflating the gap
+        # between it and Live preview beyond what every other inter-
+        # section gap actually is, in horizontal mode where they stack.
+        controls = ttk.Frame(root, padding=(FRAME_PADDING, FRAME_PADDING, FRAME_PADDING, 0))
         self.controls = controls
 
         # A LabelFrame, not a plain Frame, so it carries the same bordered,

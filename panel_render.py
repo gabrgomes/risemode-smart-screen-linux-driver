@@ -9,6 +9,7 @@ anything USB/device-specific to render a preview.
 """
 import colorsys
 import glob
+import hashlib
 import io
 import json
 import os
@@ -60,6 +61,13 @@ GAME_DETECT_INTERVAL_S = 5  # how often to re-scan for a running Steam game -
                             # doesn't need checking every frame like the
                             # panel's own render loop
 
+ART_CACHE_DIR = os.path.expanduser("~/.cache/risemode-screen/art")
+ART_CACHE_KEEP = 200  # album art churns per-track (unlike game art), so the
+                      # cache dir is pruned to its most-recently-used N files
+ART_FETCH_RETRY_S = 30  # cooldown before retrying a failed remote-art fetch
+MUSIC_INFO_INTERVAL_S = 1  # how often to re-run playerctl - track metadata
+                           # doesn't change fast enough to poll every frame
+
 CONFIG_PATH = os.path.expanduser("~/.config/risemode-screen/config.json")
 # The base background is always one of these two - Game Mode isn't a third
 # alternative to them, it's an independent overlay (see GAME_MODE_LABEL)
@@ -76,6 +84,7 @@ DEFAULT_SENSORS = {
     "gpu": True, "gpu_temp": True, "gpu_vram": True, "gpu_power": True,
     "fps": True, "frametime": True,
     "clock": True,
+    "music": True,
 }
 SENSOR_LABELS = {
     "cpu": "CPU usage",
@@ -88,6 +97,7 @@ SENSOR_LABELS = {
     "fps": "FPS / 1% low",
     "frametime": "Frame time (stutter)",
     "clock": "Clock / date",
+    "music": "Now playing",
 }
 
 # The whole panel draws through just 4 color roles - every sensor block
@@ -284,6 +294,74 @@ def get_game_stats():
         return {}
 
 
+_MUSIC_FIELDS = ("status", "xesam:artist", "xesam:title", "mpris:artUrl",
+                 "position", "mpris:length")
+
+_music_info_cache = {"time": 0.0, "info": {}}
+
+
+def _read_music_info():
+    """One `playerctl metadata` call for the currently active MPRIS player.
+    Returns {} when nothing is playing/paused, no player is running, or
+    playerctl isn't installed - the widget just won't be drawn in any of
+    those cases, same as Game Mode when no game is running."""
+    fmt = "\t".join("{{" + f + "}}" for f in _MUSIC_FIELDS)
+    try:
+        out = subprocess.check_output(
+            ["playerctl", "metadata", "--format", fmt],
+            timeout=1, stderr=subprocess.DEVNULL,
+        ).decode("utf-8", "replace").strip("\n")
+    except (subprocess.SubprocessError, OSError):
+        return {}
+    parts = out.split("\t")
+    if len(parts) < len(_MUSIC_FIELDS):
+        return {}
+    status, artist, title, art_url, position, length = parts[:6]
+    if status.strip().lower() not in ("playing", "paused"):
+        return {}
+
+    def _us_to_s(v):
+        try:
+            return float(v) / 1_000_000
+        except ValueError:
+            return None
+
+    return {
+        "status": status.strip().lower(),
+        "artist": artist.strip(),
+        "title": title.strip(),
+        "art_url": art_url.strip() or None,
+        "position": _us_to_s(position),
+        "length": _us_to_s(length),
+        "read_at": time.time(),
+    }
+
+
+def get_music_info():
+    """Cached, throttled wrapper around _read_music_info() - spawning
+    playerctl on every one of the render loop's ~6 frames/sec is wasteful,
+    and track metadata doesn't change anywhere near that fast."""
+    now = time.time()
+    if now - _music_info_cache["time"] > MUSIC_INFO_INTERVAL_S:
+        _music_info_cache["info"] = _read_music_info()
+        _music_info_cache["time"] = now
+    return _music_info_cache["info"]
+
+
+def _music_progress(music):
+    """0..1 fraction of the track elapsed, or None if the player doesn't
+    report a length (live streams). While playing, the last polled position
+    is advanced by the wall time since that poll so the bar moves smoothly
+    between the 1s metadata refreshes."""
+    length = music.get("length")
+    position = music.get("position")
+    if not length or position is None:
+        return None
+    if music.get("status") == "playing":
+        position += time.time() - music.get("read_at", time.time())
+    return max(0.0, min(1.0, position / length))
+
+
 def load_font(size):
     for path in (
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
@@ -294,6 +372,20 @@ def load_font(size):
         except OSError:
             continue
     return ImageFont.load_default()
+
+
+_font_cache = {}
+
+
+def _font(size):
+    """Memoized load_font() - the music block picks font sizes relative to
+    its own box height (which differs by orientation), so it can't just use
+    the fixed FONT_* constants; this keeps it from re-reading the TTF on
+    every frame."""
+    f = _font_cache.get(size)
+    if f is None:
+        f = _font_cache[size] = load_font(size)
+    return f
 
 FONT_DATE = load_font(54)
 FONT_BIG = load_font(64)
@@ -467,6 +559,70 @@ def _fetch_game_hero_path(appid, api_key):
         # more meaningful "best" here.
         rank_key=lambda h: (h.get("width", 0) >= HERO_4K_WIDTH, h.get("score", 0)),
     )
+
+
+_art_fetch_failures = {}
+
+
+def _prune_cache_dir(path, keep):
+    """Deletes all but the `keep` most-recently-modified files in `path`."""
+    try:
+        files = [os.path.join(path, f) for f in os.listdir(path)]
+        files = [f for f in files if os.path.isfile(f)]
+        if len(files) <= keep:
+            return
+        files.sort(key=os.path.getmtime)
+        for f in files[: len(files) - keep]:
+            try:
+                os.remove(f)
+            except OSError:
+                pass
+    except OSError:
+        pass
+
+
+def _fetch_album_art(art_url):
+    """Resolves an MPRIS `mpris:artUrl` to a local file path. `file://`
+    URLs (Spotify's Linux cache, some local players) are used directly;
+    `http(s)://` ones (browsers, streaming players) are downloaded once and
+    cached to disk keyed by a hash of the URL, so the same track never
+    re-fetches. Returns None on anything unusable - the widget then draws a
+    plain note-glyph placeholder instead."""
+    if not art_url:
+        return None
+    parsed = urllib.parse.urlparse(art_url)
+    if parsed.scheme == "file":
+        path = urllib.request.url2pathname(parsed.path)
+        return path if os.path.isfile(path) else None
+    if parsed.scheme not in ("http", "https"):
+        return None
+
+    os.makedirs(ART_CACHE_DIR, exist_ok=True)
+    key = hashlib.sha1(art_url.encode()).hexdigest()
+    for ext in ("jpg", "jpeg", "png", "webp"):
+        cached = os.path.join(ART_CACHE_DIR, f"{key}.{ext}")
+        if os.path.isfile(cached):
+            return cached
+
+    last_failure = _art_fetch_failures.get(key)
+    if last_failure is not None and time.time() - last_failure < ART_FETCH_RETRY_S:
+        return None
+
+    ext = parsed.path.rsplit(".", 1)[-1].lower()
+    if ext not in ("jpg", "jpeg", "png", "webp"):
+        ext = "jpg"
+    dest = os.path.join(ART_CACHE_DIR, f"{key}.{ext}")
+    try:
+        request = urllib.request.Request(art_url, headers={"User-Agent": _USER_AGENT})
+        with urllib.request.urlopen(request, timeout=6) as resp:
+            data = resp.read()
+        with open(dest, "wb") as f:
+            f.write(data)
+    except (urllib.error.URLError, OSError):
+        _art_fetch_failures[key] = time.time()
+        return None
+    _prune_cache_dir(ART_CACHE_DIR, ART_CACHE_KEEP)
+    return dest
 
 
 def resolve_background_path(config):
@@ -666,6 +822,100 @@ def load_background(wallpaper_override=None, canvas_size=(WIDTH, HEIGHT)):
 _fps_history = deque(maxlen=200)
 
 
+def _ellipsize(draw, text, font, max_width):
+    """Trims `text` to fit `max_width`, appending an ellipsis if it had to
+    cut anything. Binary search over the cut point rather than measuring one
+    character at a time."""
+    text = " ".join(text.split())
+    if not text or draw.textlength(text, font=font) <= max_width:
+        return text
+    ell = "…"
+    lo, hi = 0, len(text)
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if draw.textlength(text[:mid].rstrip() + ell, font=font) <= max_width:
+            lo = mid
+        else:
+            hi = mid - 1
+    return (text[:lo].rstrip() + ell) if lo else ell
+
+
+def _draw_music_block(img, draw, box, art_path, title, artist, progress, colors):
+    """Draws the "now playing" widget into `box` (x, y, w, h): a rounded
+    album-art thumbnail on the left, title over artist to its right (each
+    ellipsized to fit), and a thin progress bar under them. Font sizes and
+    the thumbnail size scale off `box`'s height, so the same code fits both
+    the tall vertical slot and the short landscape strip. `art_path` None
+    draws a note-glyph placeholder."""
+    x, y, w, h = box
+    pad = round(h * 0.08)
+    # Cap the thumbnail so it can't eat the whole width in the narrow
+    # vertical panel (462px) - it's only ever the full box height in the
+    # wide landscape strip.
+    art_size = max(1, min(h - 2 * pad, round(w * 0.26)))
+    art_x, art_y = x + pad, y + pad
+    radius = round(art_size * 0.12)
+
+    thumb = None
+    if art_path:
+        try:
+            thumb = Image.open(art_path).convert("RGB").resize(
+                (art_size, art_size), Image.LANCZOS
+            )
+        except (OSError, ValueError):
+            thumb = None
+    if thumb is None:
+        thumb = Image.new("RGB", (art_size, art_size),
+                          tuple(round(0.28 * c) for c in colors["value"]))
+        tdraw = ImageDraw.Draw(thumb)
+        note_font = _font(round(art_size * 0.55))
+        nb = tdraw.textbbox((0, 0), "♫", font=note_font)
+        tdraw.text(
+            ((art_size - (nb[2] - nb[0])) / 2 - nb[0],
+             (art_size - (nb[3] - nb[1])) / 2 - nb[1]),
+            "♫", font=note_font, fill=tuple(colors["secondary"]),
+        )
+
+    mask = Image.new("L", (art_size, art_size), 0)
+    ImageDraw.Draw(mask).rounded_rectangle(
+        [0, 0, art_size - 1, art_size - 1], radius=radius, fill=255
+    )
+    img.paste(thumb, (art_x, art_y), mask)
+
+    text_x = art_x + art_size + round(h * 0.10)
+    text_w = max(1, x + w - pad - text_x)
+    title_font = _font(round(h * 0.26))
+    artist_font = _font(round(h * 0.19))
+    title_line = _ellipsize(draw, title or "Unknown", title_font, text_w)
+    artist_line = _ellipsize(draw, artist or "", artist_font, text_w)
+
+    tb = draw.textbbox((0, 0), title_line or "X", font=title_font)
+    ab = draw.textbbox((0, 0), artist_line or "X", font=artist_font)
+    line_gap = round(h * 0.09)
+    bar_h = max(3, round(h * 0.05))
+    block_h = (tb[3] - tb[1]) + line_gap + (ab[3] - ab[1]) + line_gap + bar_h
+    cy = y + (h - block_h) / 2
+
+    draw.text((text_x, cy - tb[1]), title_line, font=title_font, fill=tuple(colors["value"]))
+    cy += (tb[3] - tb[1]) + line_gap
+    if artist_line:
+        draw.text((text_x, cy - ab[1]), artist_line, font=artist_font,
+                  fill=tuple(colors["secondary"]))
+    cy += (ab[3] - ab[1]) + line_gap
+
+    if progress is not None:
+        draw.rounded_rectangle(
+            [text_x, cy, text_x + text_w, cy + bar_h], radius=bar_h / 2,
+            fill=tuple(colors["separator"]),
+        )
+        filled = max(0.0, min(1.0, progress)) * text_w
+        if filled > bar_h:
+            draw.rounded_rectangle(
+                [text_x, cy, text_x + filled, cy + bar_h], radius=bar_h / 2,
+                fill=tuple(colors["label"]),
+            )
+
+
 def _draw_device_block(draw, y, label, value_text, secondary_parts, colors):
     """Draws one `LABEL` / big-value block with optional smaller secondary
     readings (temperature, VRAM, power, ...) packed onto a single line right
@@ -689,12 +939,13 @@ def _draw_device_block(draw, y, label, value_text, secondary_parts, colors):
     return y
 
 
-def _render_vertical(draw, canvas_w, canvas_h, sensors, cpu, mem, cpu_temp,
+def _render_vertical(img, draw, canvas_w, canvas_h, sensors, cpu, mem, cpu_temp,
                       gpu_load, gpu_temp, gpu_vram_used, gpu_power,
-                      fps, fps_low1, frametime, colors):
+                      fps, fps_low1, frametime, colors, music):
     """The original portrait layout: one column, each enabled block stacked
     top to bottom (CPU, RAM, GPU, a separator, FPS/1% low/frame time), with
-    the clock pinned to the bottom regardless of what's above it."""
+    the clock (and the now-playing widget just above it) pinned to the
+    bottom regardless of what's above them."""
     label_color = tuple(colors["label"])
     value_color = tuple(colors["value"])
     secondary_color = tuple(colors["secondary"])
@@ -742,6 +993,15 @@ def _render_vertical(draw, canvas_w, canvas_h, sensors, cpu, mem, cpu_temp,
         draw.text((20, y), f"{frametime:.1f}ms" if frametime is not None else "--", font=FONT_BIG, fill=value_color)
         y += 90
 
+    if sensors.get("music", True) and music:
+        block_h = 180
+        block_bottom = (canvas_h - 140 - 40) if sensors.get("clock", True) else (canvas_h - 40)
+        _draw_music_block(
+            img, draw, (20, block_bottom - block_h, canvas_w - 40, block_h),
+            _fetch_album_art(music.get("art_url")),
+            music.get("title"), music.get("artist"), _music_progress(music), colors,
+        )
+
     if sensors.get("clock", True):
         y = canvas_h - 140
         draw.text((20, y), time.strftime("%H:%M:%S"), font=FONT_BIG, fill=value_color)
@@ -773,16 +1033,21 @@ def _draw_column(draw, x0, col_width, canvas_h, label, value_text, secondary_tex
         y += h + gap
 
 
-def _render_horizontal(draw, canvas_w, canvas_h, sensors, cpu, mem, cpu_temp,
+def _render_horizontal(img, draw, canvas_w, canvas_h, sensors, cpu, mem, cpu_temp,
                         gpu_load, gpu_temp, gpu_vram_used, gpu_power,
-                        fps, fps_low1, frametime, colors):
+                        fps, fps_low1, frametime, colors, music):
     """The landscape layout: since the canvas is short (canvas_h is the
     panel's native WIDTH, 462px) but wide (canvas_w is its native HEIGHT,
     1920px), there's no room to stack blocks vertically the way the
     portrait layout does - instead each enabled reading gets its own
     column, all in a single row, sized to evenly fill the width. Grouped
     the same way the vertical layout's separator line groups them (system
-    stats vs. game stats+clock), just as a vertical divider instead."""
+    stats vs. game stats+clock), just as a vertical divider instead. The
+    now-playing widget, when shown, takes a full-width strip along the
+    bottom and the columns center in the height left above it."""
+    music_strip_h = round(canvas_h * 0.32) if (sensors.get("music", True) and music) else 0
+    content_h = canvas_h - music_strip_h
+
     system_cols = []
     if sensors.get("cpu", True):
         secondary = (
@@ -811,17 +1076,24 @@ def _render_horizontal(draw, canvas_w, canvas_h, sensors, cpu, mem, cpu_temp,
         game_cols.append((None, time.strftime("%H:%M:%S"), time.strftime("%d-%m-%Y")))
 
     columns = system_cols + game_cols
-    if not columns:
-        return
-    col_width = canvas_w / len(columns)
-    for i, (label, value_text, secondary_text) in enumerate(columns):
-        _draw_column(draw, i * col_width, col_width, canvas_h, label, value_text, secondary_text, colors)
+    if columns:
+        col_width = canvas_w / len(columns)
+        for i, (label, value_text, secondary_text) in enumerate(columns):
+            _draw_column(draw, i * col_width, col_width, content_h,
+                         label, value_text, secondary_text, colors)
 
-    if system_cols and game_cols:
-        sep_x = len(system_cols) * col_width
-        margin = canvas_h * 0.2
-        draw.line([(sep_x, margin), (sep_x, canvas_h - margin)],
-                  fill=tuple(colors["separator"]), width=2)
+        if system_cols and game_cols:
+            sep_x = len(system_cols) * col_width
+            margin = content_h * 0.2
+            draw.line([(sep_x, margin), (sep_x, content_h - margin)],
+                      fill=tuple(colors["separator"]), width=2)
+
+    if music_strip_h:
+        _draw_music_block(
+            img, draw, (20, content_h, canvas_w - 40, music_strip_h - 12),
+            _fetch_album_art(music.get("art_url")),
+            music.get("title"), music.get("artist"), _music_progress(music), colors,
+        )
 
 
 def render_stats_pil(config=None):
@@ -868,12 +1140,13 @@ def render_stats_pil(config=None):
     mem = psutil.virtual_memory().percent
     cpu_temp = get_cpu_temp()
     gpu_load, gpu_temp, gpu_vram_used, gpu_vram_total, gpu_power = get_gpu_stats()
+    music = get_music_info() if sensors.get("music", True) else {}
 
     canvas_w, canvas_h = canvas_size
     render_fn = _render_horizontal if orientation == "horizontal" else _render_vertical
-    render_fn(draw, canvas_w, canvas_h, sensors, cpu, mem, cpu_temp,
+    render_fn(img, draw, canvas_w, canvas_h, sensors, cpu, mem, cpu_temp,
               gpu_load, gpu_temp, gpu_vram_used, gpu_power,
-              fps, fps_low1, frametime, colors)
+              fps, fps_low1, frametime, colors, music)
 
     return img
 

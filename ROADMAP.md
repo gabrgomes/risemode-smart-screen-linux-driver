@@ -20,6 +20,14 @@ Legend: `[x]` done · `[ ]` planned · 💡 idea / maybe
 - [x] Device-grouped layout (temp under usage; GPU secondaries on one line), °C degree symbols
 - [x] Per-sensor toggles; GPU temperature toggles independently of GPU usage
 
+### Now playing (music widget)
+- [x] `"music"` sensor — album art + title + artist + progress bar; shown while playing/paused, hidden otherwise
+- [x] Data via MPRIS through one throttled `playerctl metadata` call (`get_music_info()`)
+- [x] Album art — `file://` used directly, `http(s)://` downloaded + disk-cached (`~/.cache/risemode-screen/art/`, pruned to 200 files), note-glyph placeholder when missing
+- [x] Progress bar interpolated between the 1s metadata polls
+- [x] Fits both layouts — above the clock in vertical, a full-width bottom strip in horizontal
+- [x] `install.sh` prompts for `playerctl`; README section
+
 ### Background
 - [x] Desktop wallpaper (via `gsettings`) or a custom image — center-cropped + dimmed for text legibility
 - [x] Crop axis forced by orientation — fit height for vertical, fit width for horizontal
@@ -52,36 +60,26 @@ Legend: `[x]` done · `[ ]` planned · 💡 idea / maybe
 
 ## Next up
 
-### Music / "Now Playing" widget
+### Music / "Now Playing" widget — polish
 
-Show the current track on the panel, inspired by the [Dynamic Music Pill](https://extensions.gnome.org/extension/9334/dynamic-music-pill/) GNOME extension. Data via MPRIS (`playerctl`), which covers Spotify, VLC, mpv, Rhythmbox, and Chromium/Firefox web audio. Album art fetched + disk-cached the same way as the SteamGridDB art. Display-only (the panel has no input), so it's a readout, not a control.
-
-**v1 — minimal**
-- [ ] `get_music_info()` — throttled `playerctl` call → `{status, artist, title, art_url, position, length}`; empty dict when nothing is playing
-- [ ] `_fetch_album_art(url)` — clone of `_fetch_game_image()`; cache dir `~/.cache/risemode-screen/art/`; handle `file://` directly and `http(s)://` via download; re-fetch only when the track (artUrl) changes; generic music glyph as fallback
-- [ ] `_draw_music_block()` — rounded art thumbnail (PIL mask), title + artist with ellipsis truncation, thin progress bar with interpolated position
-- [ ] Slot it into `_render_vertical` and `_render_horizontal`
-- [ ] `"music"` sensor toggle; hidden when status is Stopped / no player (like Game Mode's fallback)
-- [ ] `install.sh` — optional `playerctl` prompt (like the MangoHud one)
-- [ ] README section
-
-**Stretch**
+v1 shipped (see Shipped § Now playing). Remaining:
 - [ ] 💡 Dynamic tint — color the widget from the art's dominant color (reuse `_compute_auto_colors`)
-- [ ] 💡 Marquee scroll for long titles (needs per-frame scroll state; render loop is ~6fps so it may be choppy)
-- [ ] 💡 CJK / emoji font fallback (Noto Sans) — PIL does no automatic font fallback
-- [ ] 💡 "Show while paused" option
-
-**Known challenges**
-- `mpris:artUrl` format is inconsistent — `file://`, `http(s)://`, or missing; browsers are always remote, so the download-and-cache path is mandatory
-- Panel space budget, especially landscape (462px total height for everything)
-- Text: truncation vs marquee, plus font coverage for non-Latin scripts / emoji
-- `Position` isn't reliably signal-pushed — poll it and interpolate between polls while Playing
-- Subprocess overhead — throttle metadata to ~1s, re-fetch art only on track change
-- Confirm `DBUS_SESSION_BUS_ADDRESS` reaches the `--user` service (should, same as `gsettings` already does)
+- [ ] 💡 Marquee scroll for long titles (needs per-frame scroll state; render loop is ~6fps so it may be choppy) — v1 ellipsis-truncates
+- [ ] 💡 CJK / emoji font fallback (Noto Sans) — PIL does no automatic font fallback; non-Latin track names currently render as tofu
+- [ ] 💡 "Show while paused" option (v1 shows it while playing *or* paused)
+- [ ] 💡 Move the `playerctl` call + art fetch off the render thread (first fetch of a new track's remote art can block up to ~6s)
 
 ---
 
 ## Backlog / ideas
+- 💡 Use system fonts
+- 💡 Only show fps related info when game is detected
+- 💡 Integrate with OpenRGB - Change profile/send colors
+- 💡 Improve UI
+- 💡 Find a way to generate vertical images for games
+- 💡 Add other automatic color schemes
+- 💡 Group sensors into widgets for easier configuration
+- 💡 Add more flexibility for widget positioning
 - 💡 Brightness control — the `LIG` command exists in the protocol but only flashes, no persistent set on this firmware
 - 💡 More MangoHud-derived metrics — the CSV already carries swap, per-core load, etc.
 - 💡 Weather / notification / alert widgets

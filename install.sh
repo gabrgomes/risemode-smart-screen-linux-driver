@@ -44,6 +44,20 @@ if ! command -v mangohud >/dev/null 2>&1; then
         echo "Non-interactive shell - skipping. Install later with: sudo apt install mangohud"
     fi
 fi
+
+if ! command -v playerctl >/dev/null 2>&1; then
+    echo
+    echo "playerctl isn't installed (optional - needed for the \"Now playing\""
+    echo "music widget; without it that widget just never shows)."
+    if [ -t 0 ]; then
+        read -rp "Install playerctl now via apt? [y/N] " REPLY
+        if [[ "$REPLY" =~ ^[Yy]$ ]]; then
+            sudo apt-get install -y playerctl
+        fi
+    else
+        echo "Non-interactive shell - skipping. Install later with: sudo apt install playerctl"
+    fi
+fi
 echo
 
 # --- 2. Python virtual environment --------------------------------------

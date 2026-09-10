@@ -79,6 +79,16 @@ The panel's physical buffer is a fixed 462x1920 portrait, but for panels mounted
 
 Internally, `render_stats_pil()` renders "horizontal" as its own wide 1920x462 logical image (`panel_render.CANVAS_SIZES`) - background cropping, the auto color mode's sampling, and the sensor layout all use this logical size, and the [settings GUI](#settings-gui)'s live preview shows it exactly as rendered. Only `render_stats_image()`, right before JPEG-encoding the frame actually sent to hardware, rotates that wide image into the panel's fixed portrait buffer (`HORIZONTAL_ROTATE_DEGREES`, currently -90°) - if it comes out mounted the other way around on your hardware, that's the constant to flip.
 
+### Now playing (music widget)
+
+An optional "Now playing" sensor — a compact widget with the current track's album art, title, artist, and a progress bar, shown while something is playing or paused and hidden otherwise (like Game Mode's fallback). In the vertical layout it sits just above the clock; in horizontal it's a full-width strip along the bottom and the stat columns center in the space above it.
+
+- Requires `playerctl` (`sudo apt install playerctl` — `install.sh` prompts for it). Without it the widget just never appears.
+- Data comes from MPRIS via one throttled `playerctl metadata` call (`get_music_info()` in `panel_render.py`, re-run at most once a second). Works with any MPRIS player — Spotify, VLC, mpv, Rhythmbox, and Chromium/Firefox web audio (YouTube, YT Music, Spotify Web, ...).
+- Album art from `mpris:artUrl`: `file://` URLs are used directly, `http(s)://` ones are downloaded once and cached to `~/.cache/risemode-screen/art/` keyed by URL hash (pruned to the 200 most-recent files, since art churns per-track). Missing/unfetchable art falls back to a plain note-glyph placeholder.
+- The progress bar advances smoothly between the 1s metadata refreshes by adding the wall time elapsed since the last poll to the reported position.
+- Long titles/artists are ellipsis-truncated. A marquee scroll, dominant-colour tinting from the art, and CJK/emoji font fallback are on the [roadmap](ROADMAP.md) but not in this version — non-Latin scripts and emoji in track names currently render as tofu (the panel font is DejaVu Sans).
+
 ### GPU FPS via MangoHud
 
 The FPS/1% low/frame time shown on the panel are the *real*, live values for whatever game/GL app is currently running, read from MangoHud's own CSV logging — not the driver's own frame-send rate. `get_game_stats()` in `panel_render.py` tails the newest non-summary CSV in `~/.local/share/mangohud_logs` and parses the whole latest row (keyed by MangoHud's own column names, whose order isn't hardcoded since it depends on MangoHud's config/version) rather than just pulling out FPS, so any other column MangoHud logs (`cpu_load`, `gpu_vram_used`, `swap_used`, ...) is available the same way if you want to wire up more sensors later.

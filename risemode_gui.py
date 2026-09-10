@@ -330,8 +330,14 @@ class SettingsApp:
             # pady's top value matches controls' own top padding, so Live
             # preview's top border lines up with Display's (the first
             # section) instead of starting right at the row's own top
-            # edge while Display starts FRAME_PADDING below it.
-            self._preview_frame.grid(row=0, column=1, sticky="new", pady=(FRAME_PADDING, 0))
+            # edge while Display starts FRAME_PADDING below it. padx's
+            # right value gives it the same margin from the window's
+            # right edge that controls' own padding gives Display/etc.
+            # from the left edge - without it, Live preview's border sat
+            # flush against the window edge while theirs sat inset.
+            self._preview_frame.grid(
+                row=0, column=1, sticky="new", pady=(FRAME_PADDING, 0), padx=(0, FRAME_PADDING)
+            )
             self.root.columnconfigure(0, weight=0)
             self.root.columnconfigure(1, weight=1)
             self.root.rowconfigure(0, weight=0)

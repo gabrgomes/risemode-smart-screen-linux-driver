@@ -28,6 +28,8 @@ SECTION_PADDING = 12  # every section LabelFrame's internal border-to-
                       # content padding (Display, Background, Sensors,
                       # Colors, Live preview) - kept as one constant so
                       # they can't drift out of sync with each other
+SECTION_GAP = 16  # vertical gap after each section (including the last,
+                  # Colors) before whatever comes next
 
 # Matches install.sh's StartupWMClass= so a dock/taskbar can associate the
 # running window with the .desktop entry (and its icon) instead of falling
@@ -108,11 +110,12 @@ class SettingsApp:
         config = pr.get_config()
 
         # No bottom padding: each section already ends with its own
-        # pady=(0, 16) below it (see Display/Background/Sensors/Colors),
-        # so a padded bottom here would stack an extra FRAME_PADDING on
-        # top of that just for the last one (Colors) - inflating the gap
-        # between it and Live preview beyond what every other inter-
-        # section gap actually is, in horizontal mode where they stack.
+        # pady=(0, SECTION_GAP) below it (see Display/Background/Sensors/
+        # Colors), so a padded bottom here would stack an extra
+        # FRAME_PADDING on top of that just for the last one (Colors) -
+        # inflating the gap between it and Live preview beyond what every
+        # other inter-section gap actually is, in horizontal mode where
+        # they stack.
         controls = ttk.Frame(root, padding=(FRAME_PADDING, FRAME_PADDING, FRAME_PADDING, 0))
         self.controls = controls
 
@@ -141,7 +144,7 @@ class SettingsApp:
         # layout, including where the preview itself ends up - see
         # _apply_layout_mode())
         display_frame = ttk.LabelFrame(controls, text="Display", padding=SECTION_PADDING)
-        display_frame.pack(fill="x", pady=(0, 16))
+        display_frame.pack(fill="x", pady=(0, SECTION_GAP))
 
         self.orientation = tk.StringVar(value=config.get("orientation", "vertical"))
         self._orientation_by_label = {v: k for k, v in pr.ORIENTATION_LABELS.items()}
@@ -158,7 +161,7 @@ class SettingsApp:
 
         # --- Background ---
         wp_frame = ttk.LabelFrame(controls, text="Background", padding=SECTION_PADDING)
-        wp_frame.pack(fill="x", pady=(0, 16))
+        wp_frame.pack(fill="x", pady=(0, SECTION_GAP))
 
         self.wp_mode = tk.StringVar(value=config["background_mode"])
         self.wp_path = tk.StringVar(value=config["wallpaper"] or "")
@@ -219,7 +222,7 @@ class SettingsApp:
 
         # --- Sensors ---
         sensors_frame = ttk.LabelFrame(controls, text="Sensors", padding=SECTION_PADDING)
-        sensors_frame.pack(fill="x", pady=(0, 16))
+        sensors_frame.pack(fill="x", pady=(0, SECTION_GAP))
 
         self.sensor_vars = {}
         for key, label in pr.SENSOR_LABELS.items():
@@ -232,7 +235,7 @@ class SettingsApp:
 
         # --- Colors ---
         colors_frame = ttk.LabelFrame(controls, text="Colors", padding=SECTION_PADDING)
-        colors_frame.pack(fill="x", pady=(0, 16))
+        colors_frame.pack(fill="x", pady=(0, SECTION_GAP))
 
         self.color_mode = tk.StringVar(value=config.get("color_mode", "custom"))
         self._color_mode_by_label = {v: k for k, v in pr.COLOR_MODE_LABELS.items()}
@@ -317,16 +320,27 @@ class SettingsApp:
             min_h = self.controls.winfo_reqheight() + 340
         else:
             self.controls.grid(row=0, column=0, sticky="nw")
-            self._preview_frame.grid(row=0, column=1, sticky="nsew")
+            # "new", not "nsew": Live preview must NOT stretch vertically
+            # to fill row 0 - it has to size itself to its own actual
+            # content (an image sized to land it exactly at controls'
+            # height, see _on_preview_resize()) and stop there, or grid
+            # would stretch it to match row 0's height regardless of that
+            # content, right back to overshooting Colors' (the last
+            # section) bottom the same way sticky="nsew" here did before.
+            # pady's top value matches controls' own top padding, so Live
+            # preview's top border lines up with Display's (the first
+            # section) instead of starting right at the row's own top
+            # edge while Display starts FRAME_PADDING below it.
+            self._preview_frame.grid(row=0, column=1, sticky="new", pady=(FRAME_PADDING, 0))
             self.root.columnconfigure(0, weight=0)
             self.root.columnconfigure(1, weight=1)
-            self.root.rowconfigure(0, weight=1)
+            self.root.rowconfigure(0, weight=0)
             self.root.rowconfigure(1, weight=0)
             # The controls column doesn't stretch (weight=0), so it can
             # force the preview column to zero width unless minsize
             # reserves it a usable amount up front.
             min_w = self.controls.winfo_reqwidth() + 380
-            min_h = max(self.controls.winfo_reqheight() + 2 * FRAME_PADDING, 560)
+            min_h = self.controls.winfo_reqheight()
         self.root.minsize(min_w, min_h)
 
         # minsize only ever grows an existing window, it never shrinks one -
@@ -440,17 +454,36 @@ class SettingsApp:
         self.root.update_idletasks()
         # preview_body already excludes preview_frame's own padding *and*
         # its border/title reservation (that's the point of measuring the
-        # inner frame instead of preview_frame directly - see its creation)
-        # - only the Apply row below the image still needs subtracting out.
+        # inner frame instead of preview_frame directly - see its creation).
         avail_w = max(self._preview_body.winfo_width(), 50)
-        apply_h = self.apply_row.winfo_reqheight() + 8
-        # Capping this to controls' own (fixed) height would line up Apply
-        # with its bottom, but then the preview would stop growing when
-        # the window is resized taller - fitting the available space
-        # takes priority, so this uses preview_body's actual height (which
-        # does grow with the window) even though that means Apply only
-        # lines up with the controls column at/near minsize.
-        avail_h = max(self._preview_body.winfo_height() - apply_h, 50)
+
+        if self.orientation.get() == "vertical":
+            # In vertical mode Live preview has to match controls' height
+            # exactly (see _apply_layout_mode()), so the target here is
+            # derived straight from controls' own measured height instead
+            # of preview_body's current size - that would be self-
+            # reinforcing (a taller image gives preview_frame a taller
+            # reqheight, which grows the row to fit it, which then gets
+            # measured as "more room available" next time, without ever
+            # settling back down to controls' actual height). "chrome" is
+            # everything in preview_frame that isn't the image itself
+            # (its border, title, padding, the Apply button) - subtracting
+            # it, the shared top pady, and Colors' own trailing
+            # SECTION_GAP (controls' own reqheight includes that gap
+            # *after* Colors, which isn't part of Colors' own border) from
+            # controls' height gives the image exactly the room left over
+            # after all of that fixed overhead, however big it is.
+            chrome = self._preview_frame.winfo_reqheight() - self.preview_label.winfo_reqheight()
+            avail_h = max(
+                self.controls.winfo_reqheight() - FRAME_PADDING - SECTION_GAP - chrome, 50
+            )
+        else:
+            # Horizontal mode has no such sibling to match - it just fills
+            # whatever room row 1 actually gives it (which does grow with
+            # the window), so measuring preview_body's own current height
+            # is exactly right here.
+            apply_h = self.apply_row.winfo_reqheight() + 8
+            avail_h = max(self._preview_body.winfo_height() - apply_h, 50)
 
         # Fit the chosen orientation's logical canvas aspect ratio (portrait
         # 462x1920, or landscape 1920x462) into the available space,

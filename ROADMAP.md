@@ -70,12 +70,34 @@ v1 shipped (see Shipped § Now playing). Remaining:
 - [ ] 💡 "Show while paused" option (v1 shows it while playing *or* paused)
 - [ ] 💡 Move the `playerctl` call + art fetch off the render thread (first fetch of a new track's remote art can block up to ~6s; a title with lots of not-yet-seen CJK characters has a smaller one-time `fc-match` cost too, ~500ms for ~17 characters in testing, then free once cached)
 
+### OpenRGB integration
+
+Sync case/component RGB lighting to whatever's currently driving the panel's own background - "ambilight for the whole PC." Designed 2026-09-11; not started, no OpenRGB install on the dev machine yet to test against.
+
+**Design**
+- Priority, same precedence Game Mode already uses for the panel background: game running (its Grid/Hero art's dominant colour) > music playing (album art's dominant colour) > desktop wallpaper's dominant colour.
+- Direct color push (`device.set_mode("direct")` + `set_color()`) via [`openrgb-python`](https://github.com/jath03/openrgb-python) (pip, confirmed current: 0.3.6) - not OpenRGB's own saved profiles, which are static snapshots and can't follow the current image. This makes it an all-or-nothing takeover of whatever effect the user has running in OpenRGB's own UI while the toggle is on.
+- v1 pushes one color to every detected device - no per-device/zone picker yet.
+- New `_dominant_color(img)` util, extracted from `_compute_auto_colors()`'s own averaging step - shared with the music widget's parked "dynamic tint" idea above.
+- Own background thread in `risemode_driver.py` (alongside the existing IN-endpoint `poller` thread), own ~1-2s throttle (not every render frame - RGB doesn't need 6fps and fast SDK writes can flicker some LED chains), fully non-fatal if the SDK server isn't running - retries quietly, never touches the panel's own render loop.
+- GUI: new "RGB (OpenRGB)" section, enable switch + status line, config key `openrgb_enabled` (default off).
+
+**Animation - revised per user's suggestion**: instead of building any audio capture/analysis ourselves, lean on the community "OpenRGB Effects Plugin" (Fawtytoo) - it already has audio-reactive effects that read straight from a system audio device, no DSP work needed on our side. Plan: while music is playing, activate that plugin's audio-reactive effect instead of pushing a static album-art color; keep the static push for the idle/game states.
+- [ ] Verify the SDK can actually select a plugin-contributed effect the same way it selects a built-in mode (`device.set_mode(name)`) - plugin effects show up in OpenRGB's own UI, but it's unconfirmed whether openrgb-python's mode list/selection mirrors plugin-added effects too. Needs testing against a real OpenRGB install (none available yet) before committing to this path.
+- Requires the user to install the Effects plugin separately (not bundled with OpenRGB core) and pick/configure a suitable audio-reactive effect + correct input device (a monitor/loopback source, not a mic) themselves in OpenRGB's own UI - not something we can set up on their behalf.
+- Fallback if plugin-mode-selection doesn't pan out: a gentle wall-clock-paced brightness pulse over the album-art color while playing (same pacing technique as the marquee).
+
+**Known challenges**
+- OpenRGB's SDK server has to actually be running (`openrgb --server` or autostart) - external setup step, needs a README callout.
+- Direct-mode takeover conflicts with manually-set OpenRGB effects.
+- Device/zone granularity deferred past v1.
+- Thread safety / graceful degradation when the server is absent or restarts mid-session.
+
 ---
 
 ## Backlog / ideas
 - 💡 Use system fonts
 - [x] Only show FPS-related info when a game is detected — "Only while a game is running" toggle in the MangoHud Sensors section
-- 💡 Integrate with OpenRGB - Change profile/send colors
 - 💡 Improve UI
 - 💡 Find a way to generate vertical images for games
 - 💡 Add other automatic color schemes

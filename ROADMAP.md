@@ -66,9 +66,9 @@ Legend: `[x]` done · `[ ]` planned · 💡 idea / maybe
 v1 shipped (see Shipped § Now playing). Remaining:
 - [ ] 💡 Dynamic tint — color the widget from the art's dominant color (reuse `_compute_auto_colors`)
 - [x] Marquee scroll for long titles — continuous left-scroll loop with a blank gap, clipped to the line window; short text stays static (centered in vertical). Wall-clock paced (~55px/s). GUI preview refresh bumped to 250ms so it looks live there too.
-- [ ] 💡 CJK / emoji font fallback (Noto Sans) — PIL does no automatic font fallback; non-Latin track names currently render as tofu
+- [x] CJK / Hangul font fallback — characters outside DejaVu Sans's coverage resolve via `fc-match` (the system's own fontconfig, no bundled/hardcoded font) to whatever's installed, cached per character; text is split into per-font runs so mixed Latin+CJK lines (and the marquee) render correctly. `install.sh` prompts for `fonts-noto-cjk`. Emoji remain tofu - the common installed emoji font is a colour bitmap-strike font Pillow can't rasterize at arbitrary sizes; a plain/monochrome emoji font would work if added manually, but isn't installed by default and wasn't worth forcing on everyone for this
 - [ ] 💡 "Show while paused" option (v1 shows it while playing *or* paused)
-- [ ] 💡 Move the `playerctl` call + art fetch off the render thread (first fetch of a new track's remote art can block up to ~6s)
+- [ ] 💡 Move the `playerctl` call + art fetch off the render thread (first fetch of a new track's remote art can block up to ~6s; a title with lots of not-yet-seen CJK characters has a smaller one-time `fc-match` cost too, ~500ms for ~17 characters in testing, then free once cached)
 
 ---
 

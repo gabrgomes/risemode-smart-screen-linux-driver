@@ -395,6 +395,104 @@ def _font(size):
         f = _font_cache[size] = load_font(size)
     return f
 
+
+# Codepoint ranges DejaVu Sans (the panel's normal font) doesn't cover, so
+# text in them needs a fallback font instead of rendering as tofu - this is
+# only used for the music widget's title/artist, the one place arbitrary
+# (not English-and-us-authored) text ever reaches the panel. Ranges, not a
+# per-glyph "does this font have it" probe: simpler, and DejaVu's own
+# coverage (Latin/Cyrillic/Greek/common symbols/...) is broad enough that
+# treating anything outside these known gaps as "DejaVu already has it" is
+# a fine approximation - it isn't exhaustive (Thai/Arabic/Devanagari also
+# aren't covered), just enough to fix the common case: CJK and emoji.
+_FALLBACK_RANGES = (
+    (0x3000, 0x303F),    # CJK punctuation
+    (0x3040, 0x30FF),    # Hiragana, Katakana
+    (0x3400, 0x4DBF),    # CJK Extension A
+    (0x4E00, 0x9FFF),    # CJK Unified Ideographs
+    (0xAC00, 0xD7A3),    # Hangul syllables
+    (0xF900, 0xFAFF),    # CJK compatibility ideographs
+    (0xFF00, 0xFFEF),    # halfwidth/fullwidth forms
+    (0x1F000, 0x1FFFF),  # emoji & supplementary pictographs
+    (0x20000, 0x2FFFF),  # rarer CJK ideograph extensions
+)
+_EMOJI_RANGE = (0x1F000, 0x1FFFF)
+
+
+def _needs_fallback_font(ch):
+    cp = ord(ch)
+    return any(lo <= cp <= hi for lo, hi in _FALLBACK_RANGES)
+
+
+_fc_match_cache = {}
+
+
+def _fallback_font(ch, size):
+    """Resolves a character DejaVu Sans doesn't cover to whatever font the
+    system's own fontconfig setup already has installed for it (Noto Sans
+    CJK, an emoji font, ...) - via `fc-match`, the standard system font
+    resolver, rather than hardcoding specific package paths that vary by
+    distro/installation. Returns None if fontconfig has nothing better (or
+    isn't installed at all), or if the match it finds can't actually be
+    loaded at this pixel size - the emoji range in particular tends to
+    resolve to a colour bitmap-strike font (e.g. Noto Color Emoji) that
+    only renders at its own fixed sizes, which Pillow can't rasterize
+    arbitrarily; callers fall back to the base font (tofu) in that case,
+    same as if no fallback existed. A plain (non-colour) emoji font like
+    `fonts-noto-emoji`, if installed, works fine here - fontconfig will
+    just prefer it automatically once it's on the system."""
+    cp = ord(ch)
+    key = (cp, size)
+    if key in _fc_match_cache:
+        return _fc_match_cache[key]
+
+    font = None
+    generic = "emoji" if _EMOJI_RANGE[0] <= cp <= _EMOJI_RANGE[1] else ""
+    try:
+        out = subprocess.check_output(
+            ["fc-match", "-f", "%{file}|%{index}", f"{generic}:charset={cp:x}"],
+            timeout=1,
+        ).decode(errors="replace")
+        path, _, index = out.partition("|")
+        if path:
+            font = ImageFont.truetype(path, size, index=int(index) if index.strip().isdigit() else 0)
+    except (subprocess.SubprocessError, OSError, ValueError):
+        font = None
+
+    _fc_match_cache[key] = font
+    return font
+
+
+def _text_runs(text, base_font, size):
+    """Splits `text` into (font, substring) runs - consecutive characters
+    needing the same font. Only characters in _FALLBACK_RANGES ever look up
+    a different font than `base_font`; everything else (the common case)
+    stays a single run in the base font, so ordinary English/Latin text
+    costs nothing extra."""
+    runs = []
+    cur_font, cur_chars = base_font, []
+    for ch in text:
+        font = (_fallback_font(ch, size) or base_font) if _needs_fallback_font(ch) else base_font
+        if font is cur_font:
+            cur_chars.append(ch)
+        else:
+            if cur_chars:
+                runs.append((cur_font, "".join(cur_chars)))
+            cur_font, cur_chars = font, [ch]
+    if cur_chars:
+        runs.append((cur_font, "".join(cur_chars)))
+    return runs or [(base_font, "")]
+
+
+def _runs_width(draw, runs):
+    return sum(draw.textlength(s, font=f) for f, s in runs)
+
+
+def _draw_runs(draw, x, y, runs, fill):
+    for font, s in runs:
+        draw.text((x, y), s, font=font, fill=fill)
+        x += draw.textlength(s, font=font)
+
 FONT_DATE = load_font(38)
 FONT_BIG = load_font(64)
 FONT_MED = load_font(36)
@@ -846,16 +944,20 @@ def _draw_text_line(img, draw, x, y_top, w, text, font, fill, align="left"):
     """One line of text in the window (x, y_top)..(x+w, y_top+height). If it
     fits it's drawn statically (align "left" or "center"); if it's wider
     than the window it scrolls left in a continuous loop with a blank gap
-    between the wrapping copies, clipped to the window. Returns the line's
-    pixel height."""
+    between the wrapping copies, clipped to the window. `text` is split into
+    per-character-range font runs first (see _text_runs) so CJK/emoji in
+    track titles or artist names render instead of tofu, wherever the
+    system has a font installed that covers them. Returns the line's pixel
+    height."""
     text = " ".join(text.split())
     line_h, top = _line_height(draw, text, font)
     if not text:
         return line_h
-    tw = draw.textlength(text, font=font)
+    runs = _text_runs(text, font, font.size)
+    tw = _runs_width(draw, runs)
     if tw <= w:
         tx = x + (w - tw) / 2 if align == "center" else x
-        draw.text((tx, y_top - top), text, font=font, fill=fill)
+        _draw_runs(draw, tx, y_top - top, runs, fill)
         return line_h
 
     gap = max(60, round(w * 0.35))
@@ -876,7 +978,7 @@ def _draw_text_line(img, draw, x, y_top, w, text, font, fill, align="left"):
     region = img.crop((x0, y0, x0 + wi, y0 + line_h))
     rdraw = ImageDraw.Draw(region)
     for start in (-off, period - off):
-        rdraw.text((start, -top), text, font=font, fill=fill)
+        _draw_runs(rdraw, start, -top, runs, fill)
     img.paste(region, (x0, y0))
     return line_h
 

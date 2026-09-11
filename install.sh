@@ -58,6 +58,22 @@ if ! command -v playerctl >/dev/null 2>&1; then
         echo "Non-interactive shell - skipping. Install later with: sudo apt install playerctl"
     fi
 fi
+
+if ! fc-list 2>/dev/null | grep -qi "noto sans cjk"; then
+    echo
+    echo "No CJK-capable font detected (optional - needed for the \"Now"
+    echo "playing\" widget to render Japanese/Korean/Chinese track or"
+    echo "artist names instead of tofu boxes; everything else works fine"
+    echo "without it)."
+    if [ -t 0 ]; then
+        read -rp "Install fonts-noto-cjk now via apt (~150MB)? [y/N] " REPLY
+        if [[ "$REPLY" =~ ^[Yy]$ ]]; then
+            sudo apt-get install -y fonts-noto-cjk
+        fi
+    else
+        echo "Non-interactive shell - skipping. Install later with: sudo apt install fonts-noto-cjk"
+    fi
+fi
 echo
 
 # --- 2. Python virtual environment --------------------------------------

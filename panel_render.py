@@ -687,19 +687,77 @@ def _prune_cache_dir(path, keep):
         pass
 
 
+_SANDBOXED_PLAYER_NAMES = ("chrome", "chromium", "firefox", "spotify", "vlc")
+_sandboxed_path_cache = {}  # reported path -> (resolved path or None, checked-at)
+SANDBOXED_PATH_RETRY_S = 5  # how often to re-scan /proc for the same reported
+                            # path if it wasn't found last time - the scan
+                            # itself is not free, and a still-missing path
+                            # rarely resolves a moment later
+
+
+def _resolve_sandboxed_path(path):
+    """Best-effort fallback for a file:// art path reported by a
+    Flatpak/Snap-sandboxed player (seen with Chrome via Flatpak: YouTube's
+    thumbnail gets saved to a temp file, and MPRIS reports it correctly,
+    but the path only exists inside that player's own private /tmp - not
+    in this, unsandboxed, process's view of the filesystem at all). Same-
+    user processes' sandboxed filesystem is still reachable from outside
+    through /proc/<pid>/root/<path>, so this looks for a player-like
+    process whose root has the file at that same relative path. Cached per
+    reported path (successes verified live, failures cooled down) since
+    scanning /proc isn't free and this is called every render frame."""
+    cached = _sandboxed_path_cache.get(path)
+    if cached is not None:
+        resolved, checked_at = cached
+        if resolved and os.path.isfile(resolved):
+            return resolved
+        if resolved is None and time.time() - checked_at < SANDBOXED_PATH_RETRY_S:
+            return None
+
+    rel = path.lstrip("/")
+    resolved = None
+    try:
+        for pid_dir in glob.glob("/proc/[0-9]*"):
+            try:
+                with open(f"{pid_dir}/cmdline", "rb") as f:
+                    cmdline = f.read().decode(errors="ignore").lower()
+            except OSError:
+                continue
+            if not any(name in cmdline for name in _SANDBOXED_PLAYER_NAMES):
+                continue
+            candidate = f"{pid_dir}/root/{rel}"
+            if os.path.isfile(candidate):
+                resolved = candidate
+                break
+    except OSError:
+        resolved = None
+
+    if len(_sandboxed_path_cache) > 20:
+        now = time.time()
+        for k, (_, t) in list(_sandboxed_path_cache.items()):
+            if now - t > 30:
+                _sandboxed_path_cache.pop(k, None)
+    _sandboxed_path_cache[path] = (resolved, time.time())
+    return resolved
+
+
 def _fetch_album_art(art_url):
     """Resolves an MPRIS `mpris:artUrl` to a local file path. `file://`
-    URLs (Spotify's Linux cache, some local players) are used directly;
-    `http(s)://` ones (browsers, streaming players) are downloaded once and
-    cached to disk keyed by a hash of the URL, so the same track never
-    re-fetches. Returns None on anything unusable - the widget then draws a
-    plain note-glyph placeholder instead."""
+    URLs (Spotify's Linux cache, some local players) are used directly, or
+    resolved through a sandboxed player's own filesystem view if the plain
+    path doesn't exist (see _resolve_sandboxed_path); `http(s)://` ones
+    (browsers, streaming players) are downloaded once and cached to disk
+    keyed by a hash of the URL, so the same track never re-fetches. Returns
+    None on anything unusable - the widget then draws a plain note-glyph
+    placeholder instead."""
     if not art_url:
         return None
     parsed = urllib.parse.urlparse(art_url)
     if parsed.scheme == "file":
         path = urllib.request.url2pathname(parsed.path)
-        return path if os.path.isfile(path) else None
+        if os.path.isfile(path):
+            return path
+        return _resolve_sandboxed_path(path)
     if parsed.scheme not in ("http", "https"):
         return None
 

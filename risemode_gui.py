@@ -176,6 +176,12 @@ class SettingsApp:
         orientation_row = ttk.Frame(display_frame)
         orientation_row.pack(fill="x")
         ttk.Label(orientation_row).pack(side="left")
+        # Invert sits at the right edge; packed before the combobox so the
+        # combobox (fill/expand) takes whatever width is left over.
+        self.invert = tk.BooleanVar(value=config.get("invert", False))
+        Switch(orientation_row, variable=self.invert,
+               height=self._switch_height).pack(side="right")
+        ttk.Label(orientation_row, text="Invert").pack(side="right", padx=(6, 6))
         self.orientation_combo = ttk.Combobox(
             orientation_row, values=list(pr.ORIENTATION_LABELS.values()),
             state="readonly", width=22,
@@ -485,6 +491,7 @@ class SettingsApp:
             "colors": {k: list(v) for k, v in self.colors.items()},
             "color_mode": self.color_mode.get(),
             "orientation": self.orientation.get(),
+            "invert": self.invert.get(),
             "mangohud_when_active_only": self.mangohud_when_active_only.get(),
         }
 

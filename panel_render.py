@@ -175,6 +175,7 @@ def load_config():
         "colors": colors,
         "color_mode": color_mode,
         "orientation": orientation,
+        "invert": bool(data.get("invert", False)),
         "mangohud_when_active_only": bool(data.get("mangohud_when_active_only", False)),
     }
 
@@ -1404,7 +1405,12 @@ def render_stats_image(config=None):
     img = render_stats_pil(config)
     if config.get("orientation", "vertical") == "horizontal":
         img = img.rotate(HORIZONTAL_ROTATE_DEGREES, expand=True)
-    img = img.rotate(180)
+    # "invert" is an extra 180 degrees for a panel mounted the other way
+    # up - which lands exactly on the fixed 180 below cancelling out, so
+    # just skip it rather than rotating twice. Only the physical buffer
+    # changes; render_stats_pil() (and so the GUI's preview) stays upright.
+    if not config.get("invert"):
+        img = img.rotate(180)
     buf = io.BytesIO()
     img.save(buf, format="JPEG", quality=85)
     return buf.getvalue()

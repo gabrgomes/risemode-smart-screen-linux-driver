@@ -1160,6 +1160,12 @@ def _draw_device_block(draw, y, label, value_text, secondary_parts, colors):
     return y
 
 
+# Distance from the vertical layout's bottom edge up to the top of the
+# clock's time line (the date sits 70px below it). The music widget anchors
+# 40px above this too, so moving the clock moves both together.
+VERTICAL_CLOCK_TOP_FROM_BOTTOM = 170
+
+
 def _render_vertical(img, draw, canvas_w, canvas_h, sensors, cpu, mem, cpu_temp,
                       gpu_load, gpu_temp, gpu_vram_used, gpu_power,
                       fps, fps_low1, frametime, colors, music):
@@ -1219,7 +1225,10 @@ def _render_vertical(img, draw, canvas_w, canvas_h, sensors, cpu, mem, cpu_temp,
         bw = canvas_w - 40
         # art (~0.55*w) + room for the two centered text lines and the bar
         block_h = round(bw * 0.55) + round(bw * 0.34)
-        block_bottom = (canvas_h - 140 - 40) if sensors.get("clock", True) else (canvas_h - 40)
+        block_bottom = (
+            (canvas_h - VERTICAL_CLOCK_TOP_FROM_BOTTOM - 40)
+            if sensors.get("clock", True) else (canvas_h - 40)
+        )
         _draw_music_block(
             img, draw, (20, block_bottom - block_h, bw, block_h),
             _fetch_album_art(music.get("art_url")),
@@ -1228,7 +1237,7 @@ def _render_vertical(img, draw, canvas_w, canvas_h, sensors, cpu, mem, cpu_temp,
         )
 
     if sensors.get("clock", True):
-        y = canvas_h - 140
+        y = canvas_h - VERTICAL_CLOCK_TOP_FROM_BOTTOM
         for text, font, fill in (
             (time.strftime("%H:%M:%S"), FONT_BIG, value_color),
             (time.strftime("%d/%m/%Y"), FONT_DATE, label_color),

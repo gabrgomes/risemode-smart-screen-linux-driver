@@ -198,11 +198,16 @@ class SettingsApp:
         ttk.Label(brightness_row, text="Brightness:", width=11).pack(side="left")
         self._brightness_label = ttk.Label(brightness_row, width=5, anchor="e")
         self._brightness_label.pack(side="right")
-        ttk.Scale(
+        # tk.Scale rather than ttk.Scale: the themed slider knob is a thin
+        # sliver here, this one has a chunky, clearly visible handle
+        self._brightness_scale = tk.Scale(
             brightness_row, from_=pr.MIN_BRIGHTNESS, to=pr.MAX_BRIGHTNESS,
-            orient="horizontal", command=self._on_brightness_change,
-        ).pack(side="left", padx=6, fill="x", expand=True)
-        self._brightness_scale = brightness_row.winfo_children()[-1]
+            orient="horizontal", showvalue=False, sliderlength=30, width=24,
+            sliderrelief="raised", borderwidth=1, highlightthickness=0,
+            bg="#4caf50", activebackground="#66bb6a", troughcolor="#a8a8a8",
+            command=self._on_brightness_change,
+        )
+        self._brightness_scale.pack(side="left", padx=6, fill="x", expand=True)
         self._brightness_scale.set(self.brightness.get())
 
         # --- Background ---
@@ -307,12 +312,20 @@ class SettingsApp:
                 self.font_size_vars[key] = var
                 # Hand-rolled -/+ buttons around a plain entry: the themed
                 # Spinbox's stacked arrows are only a few px tall here
+                # Sized to match the color swatch's height: measure what each
+                # widget wants by default and pad up the difference
                 spin = ttk.Frame(row)
                 spin.pack(side="left", padx=(12, 4))
-                self._step_button(spin, "\u2212", key, -1).pack(side="left")
+                target_h = btn.winfo_reqheight()
+                minus_btn = self._step_button(spin, "\u2212", key, -1)
                 entry = ttk.Entry(spin, width=4, textvariable=var, justify="center")
-                entry.pack(side="left", padx=3, ipady=3)
-                self._step_button(spin, "+", key, +1).pack(side="left")
+                plus_btn = self._step_button(spin, "+", key, +1)
+                for w in (minus_btn, entry, plus_btn):
+                    w.pack(side="left", padx=(0, 3) if w is not plus_btn else 0)
+                self.root.update_idletasks()
+                for w in (minus_btn, plus_btn):
+                    w.configure(pady=max(0, (target_h - w.winfo_reqheight()) // 2))
+                entry.pack_configure(ipady=max(0, (target_h - entry.winfo_reqheight()) // 2))
                 # leaving the box with a half-typed/invalid value snaps it
                 # back to the last valid one instead of showing junk
                 entry.bind("<FocusOut>", lambda _e: self._sync_font_size_vars())
@@ -495,7 +508,10 @@ class SettingsApp:
     def _step_button(self, master, text, role, delta):
         """A -/+ button that changes a font size by delta px on click, and
         keeps repeating (after a short delay) while held down."""
-        button = ttk.Button(master, text=text, width=2)
+        # plain tk.Button with the color swatches' relief/border so it sits at
+        # the same height as they do (ttk buttons pad themselves taller)
+        button = tk.Button(master, text=text, width=2, relief="solid", borderwidth=1,
+                           pady=0)
         state = {"job": None}
 
         def step(first=False):

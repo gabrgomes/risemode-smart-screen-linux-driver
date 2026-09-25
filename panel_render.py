@@ -13,6 +13,7 @@ import hashlib
 import io
 import json
 import os
+import shutil
 import subprocess
 import time
 import urllib.error
@@ -55,6 +56,18 @@ STEAMGRIDDB_API_BASE = "https://www.steamgriddb.com/api/v2"
 # path(), which picks between them based on the config's orientation.
 GRID_CACHE_DIR = os.path.expanduser("~/.cache/risemode-screen/grids")
 HERO_CACHE_DIR = os.path.expanduser("~/.cache/risemode-screen/heroes")
+# Steam's own art (no API key needed): the store CDN, plus whatever the Steam
+# client already has on disk in its library cache. Cached separately from
+# SteamGridDB's since the images differ.
+STEAM_GRID_CACHE_DIR = os.path.expanduser("~/.cache/risemode-screen/steam-grids")
+STEAM_HERO_CACHE_DIR = os.path.expanduser("~/.cache/risemode-screen/steam-heroes")
+GAME_IMAGE_DIRS = (GRID_CACHE_DIR, HERO_CACHE_DIR, STEAM_GRID_CACHE_DIR, STEAM_HERO_CACHE_DIR)
+STEAM_CDN_BASE = "https://cdn.cloudflare.steamstatic.com/steam/apps"
+STEAM_LIBRARY_CACHE_DIRS = (
+    os.path.expanduser("~/.steam/steam/appcache/librarycache"),
+    os.path.expanduser("~/.local/share/Steam/appcache/librarycache"),
+    os.path.expanduser("~/.var/app/com.valvesoftware.Steam/.local/share/Steam/appcache/librarycache"),
+)
 HERO_4K_WIDTH = 3840  # SteamGridDB's "4K" hero dimension is 3840x1240,
                       # vs. 1920x620 for the standard size
 GAME_DETECT_INTERVAL_S = 5  # how often to re-scan for a running Steam game -
@@ -79,6 +92,11 @@ BACKGROUND_MODE_LABELS = {
     "custom": "Custom image",
 }
 GAME_MODE_LABEL = "Game Mode"
+GAME_IMAGE_SOURCES = ("steamgriddb", "steam")
+GAME_IMAGE_SOURCE_LABELS = {
+    "steamgriddb": "SteamGridDB (needs API key)",
+    "steam": "Steam (official art)",
+}
 DEFAULT_SENSORS = {
     "cpu": True, "cpu_temp": True, "ram": True,
     "gpu": True, "gpu_temp": True, "gpu_vram": True, "gpu_power": True,
@@ -238,6 +256,13 @@ def load_config():
         game_mode_enabled = True
     if background_mode not in BACKGROUND_MODES:
         background_mode = "desktop"
+    # Configs from before this option keep using SteamGridDB if they had a
+    # key set up; anyone without one gets Steam's own art, which needs none.
+    game_image_source = data.get(
+        "game_image_source", "steamgriddb" if data.get("steamgriddb_api_key") else "steam"
+    )
+    if game_image_source not in GAME_IMAGE_SOURCES:
+        game_image_source = "steamgriddb"
     orientation = data.get("orientation", "vertical")
     if orientation not in ORIENTATIONS:
         orientation = "vertical"
@@ -246,6 +271,7 @@ def load_config():
         "background_mode": background_mode,
         "game_mode_enabled": game_mode_enabled,
         "steamgriddb_api_key": data.get("steamgriddb_api_key", ""),
+        "game_image_source": game_image_source,
         "sensors": sensors,
         "colors": colors,
         "color_mode": color_mode,
@@ -737,6 +763,75 @@ def _fetch_game_hero_path(appid, api_key):
     )
 
 
+_steam_grid_failures = {}
+_steam_hero_failures = {}
+
+# Where to look for each kind of Steam art, in order. Portrait: the store
+# CDN's 2x (1200x1800) first - the Steam client's own cached copy is only
+# 300x450 - then 1x, then that local copy (works offline, and for newer
+# games whose CDN files live under hashed paths). Hero: the local copy is the
+# same 1920x620 as the CDN's, so prefer it and skip the network.
+_STEAM_ART_SOURCES = {
+    "grid": (("cdn", "library_600x900_2x.jpg"), ("cdn", "library_600x900.jpg"),
+             ("local", ("library_600x900.jpg", "library_capsule.jpg"))),
+    "hero": (("local", ("library_hero.jpg",)), ("cdn", "library_hero.jpg")),
+}
+
+
+def _find_local_steam_art(appid, names):
+    """Path of the first of `names` the Steam client has cached for `appid`
+    (flat `<appid>/<name>` or, in newer clients, `<appid>/<hash>/<name>`)."""
+    for base in STEAM_LIBRARY_CACHE_DIRS:
+        for name in names:
+            for pattern in (f"{appid}/{name}", f"{appid}/*/{name}"):
+                hits = glob.glob(os.path.join(base, pattern))
+                if hits:
+                    return hits[0]
+    return None
+
+
+def _fetch_steam_art(appid, kind, cache_dir, failures):
+    """Steam's official art for `appid` ("grid" portrait or "hero" wide) -
+    from the local Steam library cache or the public store CDN, no API key
+    involved. Cached into `cache_dir` like the SteamGridDB images (and
+    failures cooled down the same way); None if nothing could be found."""
+    os.makedirs(cache_dir, exist_ok=True)
+    dest = os.path.join(cache_dir, f"{appid}.jpg")
+    if os.path.isfile(dest):
+        return dest
+    last_failure = failures.get(appid)
+    if last_failure is not None and time.time() - last_failure < GAME_IMAGE_FETCH_RETRY_S:
+        return None
+
+    for source, what in _STEAM_ART_SOURCES[kind]:
+        try:
+            if source == "local":
+                local = _find_local_steam_art(appid, what)
+                if local:
+                    shutil.copyfile(local, dest)
+                    return dest
+            else:
+                request = urllib.request.Request(
+                    f"{STEAM_CDN_BASE}/{appid}/{what}", headers={"User-Agent": _USER_AGENT})
+                with urllib.request.urlopen(request, timeout=6) as resp:
+                    data = resp.read()
+                with open(dest, "wb") as f:
+                    f.write(data)
+                return dest
+        except (urllib.error.URLError, OSError):
+            continue  # e.g. a 404 for that file name - try the next candidate
+    failures[appid] = time.time()
+    return None
+
+
+def _fetch_steam_grid_path(appid, _api_key=None):
+    return _fetch_steam_art(appid, "grid", STEAM_GRID_CACHE_DIR, _steam_grid_failures)
+
+
+def _fetch_steam_hero_path(appid, _api_key=None):
+    return _fetch_steam_art(appid, "hero", STEAM_HERO_CACHE_DIR, _steam_hero_failures)
+
+
 _art_fetch_failures = {}
 
 
@@ -869,7 +964,8 @@ def resolve_background_path(config):
     Game Mode (game_mode_enabled) isn't a third alternative to those - it's
     an overlay on top of whichever base is picked, swapping in the
     currently-running game's cover art only while a game is actually
-    detected and art for it is fetchable - a portrait grid image in
+    detected and art for it is fetchable (from SteamGridDB or Steam's own art,
+    per game_image_source) - a portrait grid image in
     vertical orientation, a wide hero image in horizontal (each fits its
     panel shape far better than the other would). The instant no game is
     running (or no art could be fetched), this falls straight back through
@@ -885,11 +981,11 @@ def resolve_background_path(config):
         appid = get_running_game_appid()
         if appid:
             api_key = config.get("steamgriddb_api_key", "")
-            fetch = (
-                _fetch_game_hero_path
-                if config.get("orientation", "vertical") == "horizontal"
-                else _fetch_game_grid_path
-            )
+            horizontal = config.get("orientation", "vertical") == "horizontal"
+            if config.get("game_image_source", "steamgriddb") == "steam":
+                fetch = _fetch_steam_hero_path if horizontal else _fetch_steam_grid_path
+            else:
+                fetch = _fetch_game_hero_path if horizontal else _fetch_game_grid_path
             image_path = fetch(appid, api_key)
             if image_path:
                 return image_path

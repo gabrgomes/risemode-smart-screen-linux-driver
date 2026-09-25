@@ -221,6 +221,8 @@ class SettingsApp:
         self.wp_path = tk.StringVar(value=config["wallpaper"] or "")
         self.game_mode_enabled = tk.BooleanVar(value=config.get("game_mode_enabled", False))
         self.game_api_key = tk.StringVar(value=config.get("steamgriddb_api_key", ""))
+        self.game_image_source = tk.StringVar(value=config.get("game_image_source", "steamgriddb"))
+        self._game_source_by_label = {v: k for k, v in pr.GAME_IMAGE_SOURCE_LABELS.items()}
 
         # Source: desktop wallpaper vs. custom image - a combobox rather than
         # radio buttons since it's a single either/or choice, not a set of
@@ -257,17 +259,30 @@ class SettingsApp:
             height=self._switch_height,
         ).pack(side="right")
 
+        self.game_source_row = ttk.Frame(wp_frame)
+        self.game_source_row.pack(fill="x", padx=(20, 0), pady=(0, 3))
+        ttk.Label(self.game_source_row, text="Images:").pack(side="left")
+        self.game_source_combo = ttk.Combobox(
+            self.game_source_row, values=list(pr.GAME_IMAGE_SOURCE_LABELS.values()),
+            state="readonly", width=22,
+        )
+        self.game_source_combo.set(pr.GAME_IMAGE_SOURCE_LABELS[self.game_image_source.get()])
+        self.game_source_combo.pack(side="left", padx=6, fill="x", expand=True)
+        self.game_source_combo.bind("<<ComboboxSelected>>", self._on_game_source_selected)
+
         game_key_row = ttk.Frame(wp_frame)
         game_key_row.pack(fill="x", padx=(20, 0))
+        self.game_key_row = game_key_row
         ttk.Label(game_key_row, text="API key:").pack(side="left")
         self.game_key_entry = ttk.Entry(
             game_key_row, textvariable=self.game_api_key, width=22, show="*", font=("TkDefaultFont", BASE_FONT_SIZE - 1)
         )
         self.game_key_entry.pack(side="left", padx=6, fill="x", expand=True)
-        ttk.Label(
+        self.game_key_hint = ttk.Label(
             wp_frame, text="Get a free key at steamgriddb.com/profile/preferences",
             foreground="#888888", padding=(20, 0, 0, 0), font=("TkDefaultFont", BASE_FONT_SIZE - 2)
-        ).pack(anchor="w")
+        )
+        self.game_key_hint.pack(anchor="w")
         self.game_status_label = ttk.Label(
             wp_frame, text="", foreground="#888888", padding=(20, 4, 0, 0), font=("TkDefaultFont", BASE_FONT_SIZE - 2),
         )
@@ -505,8 +520,21 @@ class SettingsApp:
             self.custom_row.pack_forget()
         game_state = "normal" if self.game_mode_enabled.get() else "disabled"
         self.game_key_entry.configure(state=game_state)
+        self.game_source_combo.configure(
+            state="readonly" if self.game_mode_enabled.get() else "disabled")
+        # the API key only matters for SteamGridDB - hide it for Steam's art
+        if self.game_image_source.get() == "steamgriddb":
+            self.game_key_row.pack(fill="x", padx=(20, 0), after=self.game_source_row)
+            self.game_key_hint.pack(anchor="w", after=self.game_key_row)
+        else:
+            self.game_key_row.pack_forget()
+            self.game_key_hint.pack_forget()
         if not self.game_mode_enabled.get():
             self.game_status_label.configure(text="")
+
+    def _on_game_source_selected(self, _event=None):
+        self.game_image_source.set(self._game_source_by_label[self.game_source_combo.get()])
+        self._sync_wp_state()
 
     def _browse(self):
         path = filedialog.askopenfilename(
@@ -615,6 +643,7 @@ class SettingsApp:
             "background_mode": mode,
             "game_mode_enabled": self.game_mode_enabled.get(),
             "steamgriddb_api_key": self.game_api_key.get().strip(),
+            "game_image_source": self.game_image_source.get(),
             "sensors": {k: v.get() for k, v in self.sensor_vars.items()},
             "colors": {k: list(v) for k, v in self.colors.items()},
             "color_mode": self.color_mode.get(),
@@ -819,8 +848,7 @@ class SettingsApp:
                 self._set_color_button(key, rgb)
         if self.game_mode_enabled.get():
             appid = pr.get_running_game_appid()
-            game_image_dirs = (pr.GRID_CACHE_DIR, pr.HERO_CACHE_DIR)
-            if appid and bg_path and os.path.dirname(bg_path) in game_image_dirs:
+            if appid and bg_path and os.path.dirname(bg_path) in pr.GAME_IMAGE_DIRS:
                 self.game_status_label.configure(
                     text=f"Game detected (AppID {appid}) - showing its cover art"
                 )

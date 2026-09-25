@@ -49,6 +49,7 @@ Legend: `[x]` done · `[ ]` planned · 💡 idea / maybe
 
 ### Settings GUI (`risemode_gui.py`)
 - [x] Tkinter app; live preview identical to panel output; Apply writes `config.json` (picked up live)
+- [x] Drag-to-position widgets on the live preview (CPU, RAM, GPU, FPS, 1% low, frame time, clock, date, now playing); offsets saved per orientation as `positions` in `config.json`
 - [x] Resizable; Display Settings / Background / Appearance / Sensors / Live preview sections
 - [x] Comboboxes for background source and color mode
 - [x] Custom `Switch` widget (iOS-style toggle), sized to the row text
@@ -103,7 +104,8 @@ Sync case/component RGB lighting to whatever's currently driving the panel's own
 - 💡 Find a way to generate vertical images for games
 - 💡 Add other automatic color schemes
 - 💡 Group sensors into widgets for easier configuration
-- 💡 Add more flexibility for widget positioning
+- [x] Widget positioning — drag widgets around the live preview (per orientation, with a Reset layout button)
+- 💡 Widget positioning follow-ups: snap-to-center/alignment guides, resizing widgets, per-widget font sizes
 - [x] Brightness control — software dimming of the rendered frame (Display Settings slider, 10–100%), since the `LIG` command only flashes and doesn't persistently set on this firmware
 - 💡 More MangoHud-derived metrics — the CSV already carries swap, per-core load, etc.
 - 💡 Weather / notification / alert widgets

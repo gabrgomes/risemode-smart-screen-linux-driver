@@ -13,7 +13,7 @@ import os
 import tkinter as tk
 from tkinter import colorchooser, filedialog, ttk
 
-from PIL import ImageTk
+from PIL import ImageDraw, ImageTk
 
 import panel_render as pr
 
@@ -370,14 +370,37 @@ class SettingsApp:
         # --- Apply --- (below the preview, not the controls column)
         self.apply_row = ttk.Frame(preview_body)
         self.apply_row.grid(row=1, column=0, pady=(8, 0))
+        ttk.Label(self.apply_row, text="Drag widgets to move them", foreground="#707070",
+                  font=("TkDefaultFont", max(BASE_FONT_SIZE - 3, 8))).pack(pady=(0, 6))
+        button_row = ttk.Frame(self.apply_row)
+        button_row.pack()
         self.apply_button = tk.Button(
-            self.apply_row, text="Apply", command=self._apply, font=default_font,
+            button_row, text="Apply", command=self._apply, font=default_font,
         )
-        self.apply_button.pack(ipadx=10, ipady=0)  # matches wp_browse's height
+        self.apply_button.pack(side="left", ipadx=10, ipady=0)  # matches wp_browse's height
+        self.reset_button = tk.Button(
+            button_row, text="Reset layout", command=self._reset_positions, font=default_font,
+        )
+        self.reset_button.pack(side="left", padx=(8, 0), ipadx=10, ipady=0)
         self._apply_default_bg = self.apply_button.cget("background")
 
         self._last_pil_img = None
         self._preview_size = (PREVIEW_WIDTH, PREVIEW_HEIGHT)
+
+        # Drag-to-position: widget offsets are per orientation like the font
+        # sizes. _widget_boxes is filled by every preview render with where
+        # each widget landed (logical canvas px) - what clicks hit-test against.
+        self.positions = {o: {k: list(v) for k, v in config["positions"][o].items()}
+                          for o in pr.ORIENTATIONS}
+        self._widget_boxes = {}
+        self._hover = None
+        self._drag = None
+        self._drag_render_pending = False
+        self.preview_label.bind("<Motion>", self._on_preview_motion)
+        self.preview_label.bind("<Leave>", self._on_preview_leave)
+        self.preview_label.bind("<ButtonPress-1>", self._on_preview_press)
+        self.preview_label.bind("<B1-Motion>", self._on_preview_drag)
+        self.preview_label.bind("<ButtonRelease-1>", self._on_preview_release)
         preview_frame.bind("<Configure>", lambda event: self._on_preview_resize())
 
         self._apply_layout_mode()
@@ -557,6 +580,7 @@ class SettingsApp:
     def _on_orientation_selected(self, _event=None):
         self.orientation.set(self._orientation_by_label[self.orientation_combo.get()])
         self._sync_font_size_vars()
+        self._hover = None
         self._apply_layout_mode()  # re-arranges controls/preview and re-fits the preview
 
     def _sync_color_mode_state(self):
@@ -594,6 +618,7 @@ class SettingsApp:
             "orientation": self.orientation.get(),
             "font_sizes": {o: dict(v) for o, v in self.font_sizes.items()},
             "invert": self.invert.get(),
+            "positions": {o: {k: list(v) for k, v in d.items()} for o, d in self.positions.items()},
             "brightness": self.brightness.get(),
             "mangohud_when_active_only": self.mangohud_when_active_only.get(),
         }
@@ -661,15 +686,110 @@ class SettingsApp:
 
     def _show_preview(self, img):
         resized = img.resize(self._preview_size)
+        active = self._drag["name"] if self._drag else self._hover
+        box = self._widget_boxes.get(active)
+        if box:
+            k = self._preview_size[0] / img.width
+            ImageDraw.Draw(resized).rectangle(
+                [box[0] * k - 3, box[1] * k - 3, box[2] * k + 3, box[3] * k + 3],
+                outline="#4caf50", width=2,
+            )
         self._preview_photo = ImageTk.PhotoImage(resized)  # keep a reference -
                                                             # tkinter drops the
                                                             # image otherwise
         self.preview_label.configure(image=self._preview_photo)
 
-    def _tick_preview(self):
+    # --- drag widgets around the preview ---------------------------------
+
+    def _preview_to_canvas(self, event):
+        """Mouse position in the preview label -> logical canvas pixels (the
+        image sits centered in the label)."""
+        pw, ph = self._preview_size
+        cw, ch = pr.CANVAS_SIZES[self.orientation.get()]
+        left = (self.preview_label.winfo_width() - pw) / 2
+        top = (self.preview_label.winfo_height() - ph) / 2
+        return (event.x - left) * cw / pw, (event.y - top) * ch / ph
+
+    def _widget_at(self, x, y, slop=6):
+        """The widget under a canvas point (smallest box wins where boxes
+        overlap, so a small widget on top of the music art stays grabbable)."""
+        hits = [
+            (max(1, (b[2] - b[0]) * (b[3] - b[1])), name)
+            for name, b in self._widget_boxes.items()
+            if b[0] - slop <= x <= b[2] + slop and b[1] - slop <= y <= b[3] + slop
+        ]
+        return min(hits)[1] if hits else None
+
+    def _set_hover(self, name):
+        if name != self._hover:
+            self._hover = name
+            self.preview_label.configure(cursor="fleur" if name else "")
+            if self._last_pil_img is not None:
+                self._show_preview(self._last_pil_img)
+
+    def _on_preview_motion(self, event):
+        if not self._drag:
+            self._set_hover(self._widget_at(*self._preview_to_canvas(event)))
+
+    def _on_preview_leave(self, _event):
+        if not self._drag:
+            self._set_hover(None)
+
+    def _on_preview_press(self, event):
+        x, y = self._preview_to_canvas(event)
+        name = self._widget_at(x, y)
+        if name is None:
+            return
+        self._hover = name
+        self._drag = {
+            "name": name, "start": (x, y), "box": self._widget_boxes[name],
+            "off": tuple(self.positions[self.orientation.get()].get(name, (0, 0))),
+        }
+
+    def _on_preview_drag(self, event):
+        d = self._drag
+        if not d:
+            return
+        o = self.orientation.get()
+        cw, ch = pr.CANVAS_SIZES[o]
+        x, y = self._preview_to_canvas(event)
+        bx0, by0, bx1, by1 = d["box"]
+        # keep the whole widget on the canvas
+        ddx = max(-bx0, min(cw - bx1, x - d["start"][0]))
+        ddy = max(-by0, min(ch - by1, y - d["start"][1]))
+        dx, dy = round(d["off"][0] + ddx), round(d["off"][1] + ddy)
+        if abs(dx) < 6 and abs(dy) < 6:  # snap back onto the default slot
+            dx = dy = 0
+        if (dx, dy) == (0, 0):
+            self.positions[o].pop(d["name"], None)
+        else:
+            self.positions[o][d["name"]] = [dx, dy]
+        if not self._drag_render_pending:  # coalesce a burst of motion events
+            self._drag_render_pending = True
+            self.root.after_idle(self._render_drag_frame)
+
+    def _render_drag_frame(self):
+        self._drag_render_pending = False
+        self._render_preview()
+
+    def _on_preview_release(self, event):
+        if self._drag:
+            self._drag = None
+            self._hover = self._widget_at(*self._preview_to_canvas(event))
+            self._render_preview()
+
+    def _reset_positions(self):
+        self.positions[self.orientation.get()].clear()
+        self._render_preview()
+
+    def _render_preview(self):
         config = self._config_from_widgets()
-        self._last_pil_img = pr.render_stats_pil(config)
+        self._last_pil_img = pr.render_stats_pil(config, self._widget_boxes)
         self._on_preview_resize()  # also re-fits size in case it drifted
+        return config
+
+    def _tick_preview(self):
+        config = self._render_preview()
         bg_path = pr.resolve_background_path(config)
         if self.color_mode.get() == "auto":
             auto_colors = pr.get_auto_colors(bg_path)

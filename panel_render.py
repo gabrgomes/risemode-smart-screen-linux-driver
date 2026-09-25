@@ -137,6 +137,29 @@ DEFAULT_FONT_SIZES = {
 }
 MIN_FONT_SIZE, MAX_FONT_SIZE = 10, 150
 
+# Draggable widgets - each is drawn as one unit that the settings GUI can move
+# around the preview. A widget's position is an (dx, dy) offset from wherever
+# the layout would put it by default, per orientation, so an untouched config
+# looks exactly like it always did (and the other widgets keep their flow when
+# one is moved - it just leaves its old slot empty).
+WIDGET_NAMES = ("cpu", "ram", "gpu", "fps", "fps_low1", "frametime", "clock", "date", "music")
+
+
+def get_positions(config, orientation):
+    """{widget: (dx, dy)} for the orientation - unknown widgets and malformed
+    entries are dropped, and a widget at (0, 0) isn't stored at all."""
+    saved = (config.get("positions") or {}).get(orientation)
+    out = {}
+    if isinstance(saved, dict):
+        for name, off in saved.items():
+            if (name in WIDGET_NAMES and isinstance(off, (list, tuple)) and len(off) == 2
+                    and all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in off)):
+                dx, dy = round(off[0]), round(off[1])
+                if dx or dy:
+                    out[name] = (dx, dy)
+    return out
+
+
 # Panel brightness, in percent. Done in software (the rendered frame is
 # scaled darker) because the protocol's own LIG command isn't a persistent
 # set on this firmware - see the README.
@@ -229,6 +252,8 @@ def load_config():
         "orientation": orientation,
         "font_sizes": {o: get_font_sizes(data, o) for o in ORIENTATIONS},
         "invert": bool(data.get("invert", False)),
+        "positions": {o: {k: list(v) for k, v in get_positions(data, o).items()}
+                      for o in ORIENTATIONS},
         "brightness": get_brightness(data),
         "mangohud_when_active_only": bool(data.get("mangohud_when_active_only", False)),
     }
@@ -1036,6 +1061,79 @@ MARQUEE_SPEED_PX_S = 55  # scroll rate, wall-clock based so it looks the same
                          # regardless of the actual render frame rate
 
 
+class _WidgetCanvas:
+    """Stands in for both the ImageDraw and the Image while one widget is
+    drawn: every coordinate is shifted by the widget's user offset, and the
+    union of everything drawn is tracked as the widget's bounding box (used
+    by the settings GUI to hit-test drags). Measuring calls (textlength/
+    textbbox) are passed straight through untranslated."""
+
+    def __init__(self, img, draw, offset=(0, 0)):
+        self._img, self._draw = img, draw
+        self.dx, self.dy = offset
+        self.bbox = None
+        self.im = draw.im
+
+    def _grow(self, x0, y0, x1, y1):
+        if x1 <= x0 or y1 <= y0:
+            return
+        b = self.bbox
+        self.bbox = (x0, y0, x1, y1) if b is None else (
+            min(b[0], x0), min(b[1], y0), max(b[2], x1), max(b[3], y1))
+
+    def text(self, xy, text, font=None, fill=None):
+        xy = (xy[0] + self.dx, xy[1] + self.dy)
+        self._draw.text(xy, text, font=font, fill=fill)
+        if text:
+            self._grow(*self._draw.textbbox(xy, text, font=font))
+
+    def textlength(self, text, font=None):
+        return self._draw.textlength(text, font=font)
+
+    def textbbox(self, xy, text, font=None):
+        return self._draw.textbbox(xy, text, font=font)
+
+    def line(self, xy, fill=None, width=0):
+        pts = [(x + self.dx, y + self.dy) for x, y in xy]
+        self._draw.line(pts, fill=fill, width=width)
+        xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+        self._grow(min(xs), min(ys) - width / 2, max(xs), max(ys) + width / 2)
+
+    def rounded_rectangle(self, xy, radius=0, fill=None):
+        x0, y0, x1, y1 = xy[0] + self.dx, xy[1] + self.dy, xy[2] + self.dx, xy[3] + self.dy
+        self._draw.rounded_rectangle([x0, y0, x1, y1], radius=radius, fill=fill)
+        self._grow(x0, y0, x1, y1)
+
+    def crop(self, box):
+        return self._img.crop((box[0] + self.dx, box[1] + self.dy,
+                               box[2] + self.dx, box[3] + self.dy))
+
+    def paste(self, im, box, mask=None):
+        x, y = box[0] + self.dx, box[1] + self.dy
+        self._img.paste(im, (x, y), mask)
+        self._grow(x, y, x + im.width, y + im.height)
+
+
+class _Widgets:
+    """One _WidgetCanvas per widget name for a frame, created on first use
+    with that widget's saved offset. boxes() then reports where each widget
+    actually ended up."""
+
+    def __init__(self, img, draw, offsets):
+        self._img, self._draw, self._offsets = img, draw, offsets
+        self._canvases = {}
+
+    def __getitem__(self, name):
+        if name not in self._canvases:
+            self._canvases[name] = _WidgetCanvas(
+                self._img, self._draw, self._offsets.get(name, (0, 0)))
+        return self._canvases[name]
+
+    def boxes(self):
+        return {n: tuple(round(v) for v in c.bbox)
+                for n, c in self._canvases.items() if c.bbox}
+
+
 def _line_height(draw, text, font):
     """(pixel height, top offset) of one line - the top offset is what to
     subtract from a baseline y so the glyph tops sit flush at it."""
@@ -1233,7 +1331,7 @@ VERTICAL_DATE_TOP_FROM_BOTTOM = 100
 
 def _render_vertical(img, draw, canvas_w, canvas_h, sensors, cpu, mem, cpu_temp,
                       gpu_load, gpu_temp, gpu_vram_used, gpu_power,
-                      fps, fps_low1, frametime, colors, music, sizes):
+                      fps, fps_low1, frametime, colors, music, sizes, widgets):
     """The original portrait layout: one column, each enabled block stacked
     top to bottom (CPU, RAM, GPU, a separator, FPS/1% low/frame time), with
     the clock (and the now-playing widget just above it) pinned to the
@@ -1253,10 +1351,10 @@ def _render_vertical(img, draw, canvas_w, canvas_h, sensors, cpu, mem, cpu_temp,
         secondary = []
         if sensors.get("cpu_temp", True) and cpu_temp is not None:
             secondary.append(f"{cpu_temp:.0f}°C")
-        y = _draw_device_block(draw, y, "CPU", primary, secondary, colors, sizes)
+        y = _draw_device_block(widgets["cpu"], y, "CPU", primary, secondary, colors, sizes)
 
     if sensors.get("ram", True):
-        y = _draw_device_block(draw, y, "RAM", f"{mem:.0f}%", [], colors, sizes)
+        y = _draw_device_block(widgets["ram"], y, "RAM", f"{mem:.0f}%", [], colors, sizes)
 
     if sensors.get("gpu", True) and gpu_load is not None:
         secondary = []
@@ -1266,26 +1364,27 @@ def _render_vertical(img, draw, canvas_w, canvas_h, sensors, cpu, mem, cpu_temp,
             secondary.append(f"{gpu_vram_used / 1024:.1f}GB")
         if sensors.get("gpu_power", True) and gpu_power is not None:
             secondary.append(f"{gpu_power:.0f}W")
-        y = _draw_device_block(draw, y, "GPU", f"{gpu_load:.0f}%", secondary, colors, sizes)
+        y = _draw_device_block(widgets["gpu"], y, "GPU", f"{gpu_load:.0f}%", secondary, colors, sizes)
 
     if sensors.get("fps", True) or sensors.get("frametime", True):
         y += 30
         draw.line([(20, y), (canvas_w - 20, y)], fill=separator_color, width=2)
         y += 30
 
-    def stat(label, text):
+    def stat(name, label, text):
         nonlocal y
-        draw.text((20, y), label, font=f_label, fill=label_color)
+        w = widgets[name]
+        w.text((20, y), label, font=f_label, fill=label_color)
         y += label_pitch
-        draw.text((20, y), text, font=f_value, fill=value_color)
+        w.text((20, y), text, font=f_value, fill=value_color)
         y += value_pitch
 
     if sensors.get("fps", True):
-        stat("FPS", f"{fps:.1f}" if fps is not None else "--")
+        stat("fps", "FPS", f"{fps:.1f}" if fps is not None else "--")
     if sensors.get("fps_low1", True):
-        stat("1% LOW", f"{fps_low1:.1f}" if fps_low1 is not None else "--")
+        stat("fps_low1", "1% LOW", f"{fps_low1:.1f}" if fps_low1 is not None else "--")
     if sensors.get("frametime", True):
-        stat("FRAME TIME", f"{frametime:.1f}ms" if frametime is not None else "--")
+        stat("frametime", "FRAME TIME", f"{frametime:.1f}ms" if frametime is not None else "--")
 
     # Time and date are independent toggles, each with its own fixed slot -
     # switching one off never moves the other. The music widget anchors
@@ -1312,45 +1411,52 @@ def _render_vertical(img, draw, canvas_w, canvas_h, sensors, cpu, mem, cpu_temp,
         block_h = round(bw * 0.55) + round(bw * 0.34 * text_scale)
         block_bottom = (clock_top - 40) if clock_top is not None else (canvas_h - 40)
         _draw_music_block(
-            img, draw, (20, block_bottom - block_h, bw, block_h),
+            widgets["music"], widgets["music"], (20, block_bottom - block_h, bw, block_h),
             _fetch_album_art(music.get("art_url")),
             music.get("title"), music.get("artist"), _music_progress(music), colors,
             stacked=True, text_scale=text_scale,
         )
 
-    for shown, text, font, fill, y in (
-        (show_time, time.strftime("%H:%M:%S"), f_value, value_color, time_y),
-        (show_date, time.strftime("%d/%m/%Y"), f_label, label_color, date_y),
+    for shown, name, text, font, fill, y in (
+        (show_time, "clock", time.strftime("%H:%M:%S"), f_value, value_color, time_y),
+        (show_date, "date", time.strftime("%d/%m/%Y"), f_label, label_color, date_y),
     ):
         if shown:
             tw = draw.textlength(text, font=font)
-            draw.text(((canvas_w - tw) / 2, y), text, font=font, fill=fill)
+            widgets[name].text(((canvas_w - tw) / 2, y), text, font=font, fill=fill)
 
 
-def _draw_column(draw, x0, col_width, canvas_h, label, value_text, secondary_text, colors, sizes):
+def _draw_column(widgets, x0, col_width, canvas_h, label, value_text, secondary_text, owners,
+                 colors, sizes):
     """Draws one label/value/secondary group centered (both axes) within a
     column of the given width - the horizontal layout's equivalent of
     _draw_device_block, since a short, wide canvas has room for several of
     these side by side but not stacked on top of each other. label=None
     skips that line entirely (used for the clock, which the vertical layout
-    also shows with no label above it, just the time then the date)."""
+    also shows with no label above it, just the time then the date).
+    `owners` names the draggable widget each of the three lines belongs to
+    (they differ only for the clock column, where time and date are
+    separate widgets)."""
     lines = []
     if label:
-        lines.append((label, _font(sizes["label"]), tuple(colors["label"])))
+        lines.append((label, _font(sizes["label"]), tuple(colors["label"]), owners[0]))
     if value_text is not None:  # None = just the small secondary line (date-only clock)
-        lines.append((value_text, _font(sizes["value"]), tuple(colors["value"])))
+        lines.append((value_text, _font(sizes["value"]), tuple(colors["value"]), owners[1]))
     if secondary_text:
-        lines.append((secondary_text, _font(sizes["secondary"]), tuple(colors["secondary"])))
+        lines.append((secondary_text, _font(sizes["secondary"]), tuple(colors["secondary"]),
+                      owners[2]))
     if not lines:
         return
 
     gap = 8
-    heights = [draw.textbbox((0, 0), text, font=font)[3] for text, font, _ in lines]
+    heights = [widgets[owner].textbbox((0, 0), text, font=font)[3]
+               for text, font, _, owner in lines]
     total_h = sum(heights) + gap * (len(lines) - 1)
     y = (canvas_h - total_h) / 2
-    for (text, font, color), h in zip(lines, heights):
-        w = draw.textlength(text, font=font)
-        draw.text((x0 + (col_width - w) / 2, y), text, font=font, fill=color)
+    for (text, font, color, owner), h in zip(lines, heights):
+        canvas = widgets[owner]
+        w = canvas.textlength(text, font=font)
+        canvas.text((x0 + (col_width - w) / 2, y), text, font=font, fill=color)
         y += h + gap
 
 
@@ -1393,7 +1499,7 @@ def _column_widths(draw, columns, sizes, total_w, pad=24):
 
 def _render_horizontal(img, draw, canvas_w, canvas_h, sensors, cpu, mem, cpu_temp,
                         gpu_load, gpu_temp, gpu_vram_used, gpu_power,
-                        fps, fps_low1, frametime, colors, music, sizes):
+                        fps, fps_low1, frametime, colors, music, sizes, widgets):
     """The landscape layout: since the canvas is short (canvas_h is the
     panel's native WIDTH, 462px) but wide (canvas_w is its native HEIGHT,
     1920px), there's no room to stack blocks vertically the way the
@@ -1411,9 +1517,9 @@ def _render_horizontal(img, draw, canvas_w, canvas_h, sensors, cpu, mem, cpu_tem
         secondary = (
             f"{cpu_temp:.0f}°C" if sensors.get("cpu_temp", True) and cpu_temp is not None else None
         )
-        system_cols.append(("CPU", f"{cpu:.0f}%", secondary))
+        system_cols.append(("CPU", f"{cpu:.0f}%", secondary, ("cpu",) * 3))
     if sensors.get("ram", True):
-        system_cols.append(("RAM", f"{mem:.0f}%", None))
+        system_cols.append(("RAM", f"{mem:.0f}%", None, ("ram",) * 3))
     if sensors.get("gpu", True) and gpu_load is not None:
         parts = []
         if sensors.get("gpu_temp", True) and gpu_temp is not None:
@@ -1422,15 +1528,19 @@ def _render_horizontal(img, draw, canvas_w, canvas_h, sensors, cpu, mem, cpu_tem
             parts.append(f"{gpu_vram_used / 1024:.1f}GB")
         if sensors.get("gpu_power", True) and gpu_power is not None:
             parts.append(f"{gpu_power:.0f}W")
-        system_cols.append(("GPU", f"{gpu_load:.0f}%", " ".join(parts) if parts else None))
+        system_cols.append(("GPU", f"{gpu_load:.0f}%", " ".join(parts) if parts else None,
+                            ("gpu",) * 3))
 
     game_cols = []
     if sensors.get("fps", True):
-        game_cols.append(("FPS", f"{fps:.1f}" if fps is not None else "--", None))
+        game_cols.append(("FPS", f"{fps:.1f}" if fps is not None else "--", None,
+                          ("fps",) * 3))
     if sensors.get("fps_low1", True):
-        game_cols.append(("1% LOW", f"{fps_low1:.1f}" if fps_low1 is not None else "--", None))
+        game_cols.append(("1% LOW", f"{fps_low1:.1f}" if fps_low1 is not None else "--", None,
+                          ("fps_low1",) * 3))
     if sensors.get("frametime", True):
-        game_cols.append(("FRAME TIME", f"{frametime:.1f}ms" if frametime is not None else "--", None))
+        game_cols.append(("FRAME TIME", f"{frametime:.1f}ms" if frametime is not None else "--",
+                          None, ("frametime",) * 3))
     show_time, show_date = sensors.get("clock", True), sensors.get("date", True)
     if show_time or show_date:
         # one column either way; time on top, date under it, and either can
@@ -1439,15 +1549,16 @@ def _render_horizontal(img, draw, canvas_w, canvas_h, sensors, cpu, mem, cpu_tem
             None,
             time.strftime("%H:%M:%S") if show_time else None,
             time.strftime("%d/%m/%Y") if show_date else None,
+            ("clock", "clock", "date"),
         ))
 
     columns = system_cols + game_cols
     if columns:
         widths = _column_widths(draw, columns, sizes, canvas_w)
         x = 0
-        for (label, value_text, secondary_text), col_width in zip(columns, widths):
-            _draw_column(draw, x, col_width, content_h,
-                         label, value_text, secondary_text, colors, sizes)
+        for (label, value_text, secondary_text, owners), col_width in zip(columns, widths):
+            _draw_column(widgets, x, col_width, content_h,
+                         label, value_text, secondary_text, owners, colors, sizes)
             x += col_width
 
         if system_cols and game_cols:
@@ -1458,19 +1569,21 @@ def _render_horizontal(img, draw, canvas_w, canvas_h, sensors, cpu, mem, cpu_tem
 
     if music_strip_h:
         _draw_music_block(
-            img, draw, (20, content_h, canvas_w - 40, music_strip_h - 12),
+            widgets["music"], widgets["music"], (20, content_h, canvas_w - 40, music_strip_h - 12),
             _fetch_album_art(music.get("art_url")),
             music.get("title"), music.get("artist"), _music_progress(music), colors,
             text_scale=sizes["secondary"] / DEFAULT_FONT_SIZES["horizontal"]["secondary"],
         )
 
 
-def render_stats_pil(config=None):
+def render_stats_pil(config=None, boxes=None):
     """Renders one frame as an upright (non-rotated) PIL Image, at whichever
     logical canvas size and layout the config's orientation calls for (see
     CANVAS_SIZES/_render_vertical/_render_horizontal). config defaults to
     the saved on-disk config; the GUI passes its own in-memory (not-yet-
-    applied) selections here to preview them before saving."""
+    applied) selections here to preview them before saving. If `boxes` is a
+    dict it's filled with {widget: (x0, y0, x1, y1)} - where each drawn
+    widget landed on the logical canvas - for the GUI's drag hit-testing."""
     if config is None:
         config = get_config()
     sensors = config.get("sensors", DEFAULT_SENSORS)
@@ -1517,10 +1630,14 @@ def render_stats_pil(config=None):
 
     canvas_w, canvas_h = canvas_size
     render_fn = _render_horizontal if orientation == "horizontal" else _render_vertical
+    widgets = _Widgets(img, draw, get_positions(config, orientation))
     render_fn(img, draw, canvas_w, canvas_h, sensors, cpu, mem, cpu_temp,
               gpu_load, gpu_temp, gpu_vram_used, gpu_power,
               fps, fps_low1, frametime, colors, music,
-              get_font_sizes(config, orientation))
+              get_font_sizes(config, orientation), widgets)
+    if boxes is not None:
+        boxes.clear()
+        boxes.update(widgets.boxes())
 
     brightness = get_brightness(config)
     if brightness < MAX_BRIGHTNESS:

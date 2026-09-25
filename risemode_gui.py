@@ -10,8 +10,9 @@ service picks it up on its very next frame (get_config() is cached by
 mtime and reloads automatically), no restart needed.
 """
 import os
+import subprocess
 import tkinter as tk
-from tkinter import colorchooser, filedialog, ttk
+from tkinter import colorchooser, filedialog, font as tkfont, ttk
 
 from PIL import ImageDraw, ImageTk
 
@@ -24,7 +25,40 @@ SNAP_SCREEN_PX = 8  # how close (on screen) a dragged widget's center has to get
 GUIDE_COLOR = "#ff4081"  # the center guide lines shown while snapped
 PREVIEW_REFRESH_MS = 250  # low enough for the marquee scroll and the clock
                           # seconds to look live in the preview
-BASE_FONT_SIZE = 13
+
+
+def system_ui_font():
+    """(family, size in points) of the desktop's interface font, so the app
+    looks like the rest of the system: GNOME's `font-name` (e.g. "Inter 10")
+    scaled by its `text-scaling-factor`. Anywhere that can't be read (not
+    GNOME, no gsettings) it's Tk's own default font, which already follows
+    the X resources/Xft settings."""
+    def gsetting(key):
+        try:
+            out = subprocess.check_output(
+                ["gsettings", "get", "org.gnome.desktop.interface", key],
+                timeout=1, stderr=subprocess.DEVNULL,
+            ).decode().strip()
+        except (subprocess.SubprocessError, OSError):
+            return None
+        return out.strip("'\"")
+
+    family = size = None
+    name = gsetting("font-name")
+    if name:
+        head, _, tail = name.rpartition(" ")
+        try:
+            family, size = head, float(tail)
+        except ValueError:
+            family = size = None
+    if not family:
+        default = tkfont.nametofont("TkDefaultFont")
+        family, size = default.cget("family"), abs(default.cget("size"))
+    try:
+        scale = float(gsetting("text-scaling-factor") or 1)
+    except ValueError:
+        scale = 1
+    return family, max(6, round(size * min(max(scale, 0.5), 3)))
 FRAME_PADDING = 18   # controls' own outer inset, and the margin Live
                      # preview gets to line its own border up with the
                      # other sections' in horizontal mode (see below)
@@ -113,11 +147,20 @@ class SettingsApp:
         root.title("Risemode Smart Screen Settings")
         root.geometry("1300x900")
 
+        # Fonts follow the system's UI font and size. The named Tk fonts are
+        # updated too, so anything not given an explicit font (entries,
+        # combobox drop-downs, menus, ...) matches as well.
+        self._font_family, self._font_size = system_ui_font()
+        self._ui_fonts = {}
+        for name in ("TkDefaultFont", "TkTextFont", "TkMenuFont", "TkHeadingFont",
+                     "TkCaptionFont", "TkSmallCaptionFont", "TkIconFont", "TkTooltipFont"):
+            tkfont.nametofont(name).configure(family=self._font_family, size=self._font_size)
+        default_font = self._ui_font()
+        bold_font = self._ui_font(bold=True)
         style = ttk.Style()
-        default_font = ("TkDefaultFont", BASE_FONT_SIZE)
         style.configure(".", font=default_font)
-        style.configure("TLabelframe.Label", font=("TkDefaultFont", BASE_FONT_SIZE, "bold"))
-        style.configure("Heading.TLabel", font=("TkDefaultFont", BASE_FONT_SIZE, "bold"))
+        style.configure("TLabelframe.Label", font=bold_font)
+        style.configure("Heading.TLabel", font=bold_font)
 
         # How tall a Switch needs to be to match a row's own label text -
         # measured directly from a throwaway label at the app's actual
@@ -275,16 +318,16 @@ class SettingsApp:
         self.game_key_row = game_key_row
         ttk.Label(game_key_row, text="API key:").pack(side="left")
         self.game_key_entry = ttk.Entry(
-            game_key_row, textvariable=self.game_api_key, width=22, show="*", font=("TkDefaultFont", BASE_FONT_SIZE - 1)
+            game_key_row, textvariable=self.game_api_key, width=22, show="*", font=self._ui_font(-1)
         )
         self.game_key_entry.pack(side="left", padx=6, fill="x", expand=True)
         self.game_key_hint = ttk.Label(
             wp_frame, text="Get a free key at steamgriddb.com/profile/preferences",
-            foreground="#888888", padding=(20, 0, 0, 0), font=("TkDefaultFont", BASE_FONT_SIZE - 2)
+            foreground="#888888", padding=(20, 0, 0, 0), font=self._ui_font(-2)
         )
         self.game_key_hint.pack(anchor="w")
         self.game_status_label = ttk.Label(
-            wp_frame, text="", foreground="#888888", padding=(20, 4, 0, 0), font=("TkDefaultFont", BASE_FONT_SIZE - 2),
+            wp_frame, text="", foreground="#888888", padding=(20, 4, 0, 0), font=self._ui_font(-2),
         )
         self.game_status_label.pack(anchor="w")
 
@@ -389,7 +432,7 @@ class SettingsApp:
         self.apply_row = ttk.Frame(preview_body)
         self.apply_row.grid(row=1, column=0, pady=(8, 0))
         ttk.Label(self.apply_row, text="Drag widgets to move them", foreground="#707070",
-                  font=("TkDefaultFont", max(BASE_FONT_SIZE - 3, 8))).pack(pady=(0, 6))
+                  font=self._ui_font(-2)).pack(pady=(0, 6))
         button_row = ttk.Frame(self.apply_row)
         button_row.pack()
         self.apply_button = tk.Button(
@@ -423,6 +466,18 @@ class SettingsApp:
 
         self._apply_layout_mode()
         self._tick_preview()
+
+    def _ui_font(self, delta=0, bold=False):
+        """The system UI font at `delta` points off its size (never below
+        6pt) - a Font object, kept referenced so Tk doesn't drop it."""
+        cache = self._ui_fonts
+        key = (delta, bold)
+        if key not in cache:
+            cache[key] = tkfont.Font(
+                root=self.root, family=self._font_family,
+                size=max(6, self._font_size + delta), weight="bold" if bold else "normal",
+            )
+        return cache[key]
 
     def _apply_layout_mode(self):
         """Arranges controls and the live preview based on orientation:

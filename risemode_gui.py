@@ -19,6 +19,9 @@ import panel_render as pr
 
 PREVIEW_HEIGHT = 900  # initial size; the preview pane resizes with the window
 PREVIEW_WIDTH = round(pr.WIDTH * PREVIEW_HEIGHT / pr.HEIGHT)
+SNAP_SCREEN_PX = 8  # how close (on screen) a dragged widget's center has to get to
+                    # the canvas center before it snaps onto it
+GUIDE_COLOR = "#ff4081"  # the center guide lines shown while snapped
 PREVIEW_REFRESH_MS = 250  # low enough for the marquee scroll and the clock
                           # seconds to look live in the preview
 BASE_FONT_SIZE = 13
@@ -687,6 +690,14 @@ class SettingsApp:
     def _show_preview(self, img):
         resized = img.resize(self._preview_size)
         active = self._drag["name"] if self._drag else self._hover
+        if self._drag and any(self._drag.get("guides", ())):
+            guide_x, guide_y = self._drag["guides"]
+            gdraw = ImageDraw.Draw(resized)
+            pw, ph = self._preview_size
+            if guide_x:
+                gdraw.line([(pw / 2, 0), (pw / 2, ph)], fill=GUIDE_COLOR, width=1)
+            if guide_y:
+                gdraw.line([(0, ph / 2), (pw, ph / 2)], fill=GUIDE_COLOR, width=1)
         box = self._widget_boxes.get(active)
         if box:
             k = self._preview_size[0] / img.width
@@ -757,9 +768,20 @@ class SettingsApp:
         # keep the whole widget on the canvas
         ddx = max(-bx0, min(cw - bx1, x - d["start"][0]))
         ddy = max(-by0, min(ch - by1, y - d["start"][1]))
+        # snap the widget's center onto the canvas center, per axis, when
+        # it's within a few screen pixels of it
+        snap = SNAP_SCREEN_PX * cw / self._preview_size[0]
+        mid_x, mid_y = (bx0 + bx1) / 2, (by0 + by1) / 2
+        if abs(mid_x + ddx - cw / 2) <= snap:
+            ddx = cw / 2 - mid_x
+        if abs(mid_y + ddy - ch / 2) <= snap:
+            ddy = ch / 2 - mid_y
         dx, dy = round(d["off"][0] + ddx), round(d["off"][1] + ddy)
         if abs(dx) < 6 and abs(dy) < 6:  # snap back onto the default slot
             dx = dy = 0
+        # guides show for whichever center line the final position sits on
+        shift_x, shift_y = dx - d["off"][0], dy - d["off"][1]
+        d["guides"] = (abs(mid_x + shift_x - cw / 2) <= 1, abs(mid_y + shift_y - ch / 2) <= 1)
         if (dx, dy) == (0, 0):
             self.positions[o].pop(d["name"], None)
         else:

@@ -105,7 +105,8 @@ Sync case/component RGB lighting to whatever's currently driving the panel's own
 - 💡 Add other automatic color schemes
 - 💡 Group sensors into widgets for easier configuration
 - [x] Widget positioning — drag widgets around the live preview (per orientation, with a Reset layout button)
-- 💡 Widget positioning follow-ups: snap-to-center/alignment guides, resizing widgets, per-widget font sizes
+- [x] Snap-to-center guides while dragging (pink line, per axis)
+- 💡 Widget positioning follow-ups: alignment guides against other widgets, resizing widgets, per-widget font sizes
 - [x] Brightness control — software dimming of the rendered frame (Display Settings slider, 10–100%), since the `LIG` command only flashes and doesn't persistently set on this firmware
 - 💡 More MangoHud-derived metrics — the CSV already carries swap, per-core load, etc.
 - 💡 Weather / notification / alert widgets

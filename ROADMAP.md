@@ -15,7 +15,7 @@ Legend: `[x]` done · `[ ]` planned · 💡 idea / maybe
 - [x] `install.sh` — system deps, udev rule, plugdev group, service, menu shortcut (all idempotent)
 
 ### Sensors
-- [x] CPU usage + temperature, RAM, GPU usage + temperature + VRAM + power, FPS / 1% low, frame time, clock / date
+- [x] CPU usage + temperature, RAM, GPU usage + temperature + VRAM + power, FPS / 1% low, frame time, clock and date (independent toggles; a config saved before the split keeps them together until you change it)
 - [x] FPS / frametime from MangoHud CSV logs (header-driven column parsing, no hardcoded order)
 - [x] Device-grouped layout (temp under usage; GPU secondaries on one line), °C degree symbols
 - [x] Per-sensor toggles; GPU temperature toggles independently of GPU usage

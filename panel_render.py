@@ -83,7 +83,7 @@ DEFAULT_SENSORS = {
     "cpu": True, "cpu_temp": True, "ram": True,
     "gpu": True, "gpu_temp": True, "gpu_vram": True, "gpu_power": True,
     "fps": True, "fps_low1": True, "frametime": True,
-    "clock": True,
+    "clock": True, "date": True,
     "music": True,
 }
 SENSOR_LABELS = {
@@ -104,7 +104,8 @@ MHSENSOR_LABELS = {
 
 EXTRA_LABELS = {
     "music": "Now playing",
-    "clock": "Clock / date",
+    "clock": "Clock",
+    "date": "Date",
 }
 
 # The whole panel draws through just 4 color roles - every sensor block
@@ -142,7 +143,13 @@ def load_config():
     except (OSError, ValueError):
         data = {}
     sensors = dict(DEFAULT_SENSORS)
-    sensors.update(data.get("sensors", {}))
+    saved_sensors = data.get("sensors", {})
+    sensors.update(saved_sensors)
+    if "date" not in saved_sensors and "clock" in saved_sensors:
+        # The date used to be part of the one "clock" toggle - a config
+        # saved before they were split keeps showing/hiding it with the
+        # clock instead of the date suddenly reappearing.
+        sensors["date"] = saved_sensors["clock"]
     colors = dict(DEFAULT_COLORS)
     colors.update(data.get("colors", {}))
     color_mode = data.get("color_mode", "custom")
@@ -1221,14 +1228,20 @@ def _render_vertical(img, draw, canvas_w, canvas_h, sensors, cpu, mem, cpu_temp,
         draw.text((20, y), f"{frametime:.1f}ms" if frametime is not None else "--", font=FONT_BIG, fill=value_color)
         y += 90
 
+    # Time and date are independent toggles, each with its own fixed slot -
+    # switching one off never moves the other. The music widget anchors
+    # above whichever of the two is topmost (or the bottom edge if neither).
+    show_time = sensors.get("clock", True)
+    show_date = sensors.get("date", True)
+    time_y = canvas_h - VERTICAL_CLOCK_TOP_FROM_BOTTOM
+    date_y = time_y + 70
+    clock_top = time_y if show_time else (date_y if show_date else None)
+
     if sensors.get("music", True) and music:
         bw = canvas_w - 40
         # art (~0.55*w) + room for the two centered text lines and the bar
         block_h = round(bw * 0.55) + round(bw * 0.34)
-        block_bottom = (
-            (canvas_h - VERTICAL_CLOCK_TOP_FROM_BOTTOM - 40)
-            if sensors.get("clock", True) else (canvas_h - 40)
-        )
+        block_bottom = (clock_top - 40) if clock_top is not None else (canvas_h - 40)
         _draw_music_block(
             img, draw, (20, block_bottom - block_h, bw, block_h),
             _fetch_album_art(music.get("art_url")),
@@ -1236,15 +1249,13 @@ def _render_vertical(img, draw, canvas_w, canvas_h, sensors, cpu, mem, cpu_temp,
             stacked=True,
         )
 
-    if sensors.get("clock", True):
-        y = canvas_h - VERTICAL_CLOCK_TOP_FROM_BOTTOM
-        for text, font, fill in (
-            (time.strftime("%H:%M:%S"), FONT_BIG, value_color),
-            (time.strftime("%d/%m/%Y"), FONT_DATE, label_color),
-        ):
+    for shown, text, font, fill, y in (
+        (show_time, time.strftime("%H:%M:%S"), FONT_BIG, value_color, time_y),
+        (show_date, time.strftime("%d/%m/%Y"), FONT_DATE, label_color, date_y),
+    ):
+        if shown:
             tw = draw.textlength(text, font=font)
             draw.text(((canvas_w - tw) / 2, y), text, font=font, fill=fill)
-            y += 70
 
 
 def _draw_column(draw, x0, col_width, canvas_h, label, value_text, secondary_text, colors):
@@ -1257,9 +1268,12 @@ def _draw_column(draw, x0, col_width, canvas_h, label, value_text, secondary_tex
     lines = []
     if label:
         lines.append((label, FONT_LABEL_H, tuple(colors["label"])))
-    lines.append((value_text, FONT_VALUE_H, tuple(colors["value"])))
+    if value_text is not None:  # None = just the small secondary line (date-only clock)
+        lines.append((value_text, FONT_VALUE_H, tuple(colors["value"])))
     if secondary_text:
         lines.append((secondary_text, FONT_SECONDARY_H, tuple(colors["secondary"])))
+    if not lines:
+        return
 
     gap = 8
     heights = [draw.textbbox((0, 0), text, font=font)[3] for text, font, _ in lines]
@@ -1311,8 +1325,15 @@ def _render_horizontal(img, draw, canvas_w, canvas_h, sensors, cpu, mem, cpu_tem
         game_cols.append(("1% LOW", f"{fps_low1:.1f}" if fps_low1 is not None else "--", None))
     if sensors.get("frametime", True):
         game_cols.append(("FRAME TIME", f"{frametime:.1f}ms" if frametime is not None else "--", None))
-    if sensors.get("clock", True):
-        game_cols.append((None, time.strftime("%H:%M:%S"), time.strftime("%d/%m/%Y")))
+    show_time, show_date = sensors.get("clock", True), sensors.get("date", True)
+    if show_time or show_date:
+        # one column either way; time on top, date under it, and either can
+        # be left out (date-only is just the small secondary line)
+        game_cols.append((
+            None,
+            time.strftime("%H:%M:%S") if show_time else None,
+            time.strftime("%d/%m/%Y") if show_date else None,
+        ))
 
     columns = system_cols + game_cols
     if columns:

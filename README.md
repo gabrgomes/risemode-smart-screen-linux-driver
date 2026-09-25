@@ -12,7 +12,7 @@ This is a generic/commodity HID controller board (unrelated to the well-known "T
 
 ## What it does
 
-Runs as a background service that renders live system and game-performance stats directly onto the panel — no Windows, no VM required. Available sensors: CPU usage, CPU temperature, RAM usage, GPU usage/temperature, GPU VRAM usage, GPU power draw, FPS/1% low, frame time, and a clock. The panel background defaults to your current desktop wallpaper (auto-detected, center-cropped to the panel's portrait aspect ratio, and dimmed for text legibility). A settings GUI (`risemode_gui.py`) lets you pick a different background image and toggle sensors on/off, with a live preview, and applies instantly to the running service — see [Settings GUI](#settings-gui).
+Runs as a background service that renders live system and game-performance stats directly onto the panel — no Windows, no VM required. Available sensors: CPU usage, CPU temperature, RAM usage, GPU usage/temperature, GPU VRAM usage, GPU power draw, FPS/1% low, frame time, a clock and a date (separate toggles - either can be shown without the other). The panel background defaults to your current desktop wallpaper (auto-detected, center-cropped to the panel's portrait aspect ratio, and dimmed for text legibility). A settings GUI (`risemode_gui.py`) lets you pick a different background image and toggle sensors on/off, with a live preview, and applies instantly to the running service — see [Settings GUI](#settings-gui).
 
 ## Protocol notes
 

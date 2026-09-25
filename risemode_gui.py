@@ -275,7 +275,7 @@ class SettingsApp:
         self._color_mode_by_label = {v: k for k, v in pr.COLOR_MODE_LABELS.items()}
         mode_row = ttk.Frame(colors_frame)
         mode_row.pack(fill="x", pady=(0, 10))
-        ttk.Label(mode_row, text="Mode:").pack(side="left")
+        ttk.Label(mode_row, text="Colors:").pack(side="left")
         self.color_mode_combo = ttk.Combobox(
             mode_row, values=list(pr.COLOR_MODE_LABELS.values()),
             state="readonly", width=22,

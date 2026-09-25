@@ -21,7 +21,7 @@ import urllib.request
 from collections import deque
 
 import psutil
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageEnhance, ImageFont
 
 WIDTH, HEIGHT = 462, 1920  # the physical panel's fixed native buffer size -
                            # always portrait, regardless of ORIENTATION below
@@ -137,6 +137,20 @@ DEFAULT_FONT_SIZES = {
 }
 MIN_FONT_SIZE, MAX_FONT_SIZE = 10, 150
 
+# Panel brightness, in percent. Done in software (the rendered frame is
+# scaled darker) because the protocol's own LIG command isn't a persistent
+# set on this firmware - see the README.
+MIN_BRIGHTNESS, MAX_BRIGHTNESS = 10, 100
+
+
+def get_brightness(config):
+    """config's brightness as an int percent within range (100 if missing or
+    invalid)."""
+    value = config.get("brightness", MAX_BRIGHTNESS)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return MAX_BRIGHTNESS
+    return max(MIN_BRIGHTNESS, min(MAX_BRIGHTNESS, round(value)))
+
 
 def _clean_font_size(value, default):
     """`value` as an int within the allowed range, else `default` - a hand-
@@ -215,6 +229,7 @@ def load_config():
         "orientation": orientation,
         "font_sizes": {o: get_font_sizes(data, o) for o in ORIENTATIONS},
         "invert": bool(data.get("invert", False)),
+        "brightness": get_brightness(data),
         "mangohud_when_active_only": bool(data.get("mangohud_when_active_only", False)),
     }
 
@@ -1507,6 +1522,9 @@ def render_stats_pil(config=None):
               fps, fps_low1, frametime, colors, music,
               get_font_sizes(config, orientation))
 
+    brightness = get_brightness(config)
+    if brightness < MAX_BRIGHTNESS:
+        img = ImageEnhance.Brightness(img).enhance(brightness / 100)
     return img
 
 

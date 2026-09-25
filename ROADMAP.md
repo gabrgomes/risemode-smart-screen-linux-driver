@@ -49,7 +49,7 @@ Legend: `[x]` done · `[ ]` planned · 💡 idea / maybe
 
 ### Settings GUI (`risemode_gui.py`)
 - [x] Tkinter app; live preview identical to panel output; Apply writes `config.json` (picked up live)
-- [x] Resizable; Display / Background / Appearance / Sensors / Live preview sections
+- [x] Resizable; Display Settings / Background / Appearance / Sensors / Live preview sections
 - [x] Comboboxes for background source and color mode
 - [x] Custom `Switch` widget (iOS-style toggle), sized to the row text
 - [x] Menu shortcut + dock/taskbar icon association (`WM_CLASS` / `StartupWMClass`)
@@ -104,6 +104,6 @@ Sync case/component RGB lighting to whatever's currently driving the panel's own
 - 💡 Add other automatic color schemes
 - 💡 Group sensors into widgets for easier configuration
 - 💡 Add more flexibility for widget positioning
-- 💡 Brightness control — the `LIG` command exists in the protocol but only flashes, no persistent set on this firmware
+- [x] Brightness control — software dimming of the rendered frame (Display Settings slider, 10–100%), since the `LIG` command only flashes and doesn't persistently set on this firmware
 - 💡 More MangoHud-derived metrics — the CSV already carries swap, per-core load, etc.
 - 💡 Weather / notification / alert widgets

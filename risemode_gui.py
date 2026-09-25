@@ -168,14 +168,14 @@ class SettingsApp:
         # --- Display --- (first: orientation affects every other section's
         # layout, including where the preview itself ends up - see
         # _apply_layout_mode())
-        display_frame = ttk.LabelFrame(controls, text="Display Orientation", padding=SECTION_PADDING)
+        display_frame = ttk.LabelFrame(controls, text="Display Settings", padding=SECTION_PADDING)
         display_frame.pack(fill="x", pady=(0, SECTION_GAP))
 
         self.orientation = tk.StringVar(value=config.get("orientation", "vertical"))
         self._orientation_by_label = {v: k for k, v in pr.ORIENTATION_LABELS.items()}
         orientation_row = ttk.Frame(display_frame)
         orientation_row.pack(fill="x")
-        ttk.Label(orientation_row).pack(side="left")
+        ttk.Label(orientation_row, text="Orientation:", width=11).pack(side="left")
         # Invert sits at the right edge; packed before the combobox so the
         # combobox (fill/expand) takes whatever width is left over.
         self.invert = tk.BooleanVar(value=config.get("invert", False))
@@ -189,6 +189,21 @@ class SettingsApp:
         self.orientation_combo.set(pr.ORIENTATION_LABELS[self.orientation.get()])
         self.orientation_combo.pack(side="left", padx=6, fill="x", expand=True)
         self.orientation_combo.bind("<<ComboboxSelected>>", self._on_orientation_selected)
+
+        # Brightness: percent slider with a live readout. The preview
+        # refreshes on its own timer, so dragging shows up there straight away.
+        self.brightness = tk.IntVar(value=pr.get_brightness(config))
+        brightness_row = ttk.Frame(display_frame)
+        brightness_row.pack(fill="x", pady=(6, 0))
+        ttk.Label(brightness_row, text="Brightness:", width=11).pack(side="left")
+        self._brightness_label = ttk.Label(brightness_row, width=5, anchor="e")
+        self._brightness_label.pack(side="right")
+        ttk.Scale(
+            brightness_row, from_=pr.MIN_BRIGHTNESS, to=pr.MAX_BRIGHTNESS,
+            orient="horizontal", command=self._on_brightness_change,
+        ).pack(side="left", padx=6, fill="x", expand=True)
+        self._brightness_scale = brightness_row.winfo_children()[-1]
+        self._brightness_scale.set(self.brightness.get())
 
         # --- Background ---
         wp_frame = ttk.LabelFrame(controls, text="Background", padding=SECTION_PADDING)
@@ -472,6 +487,11 @@ class SettingsApp:
         self.color_mode.set(self._color_mode_by_label[self.color_mode_combo.get()])
         self._sync_color_mode_state()
 
+    def _on_brightness_change(self, raw):
+        value = round(float(raw))
+        self.brightness.set(value)
+        self._brightness_label.configure(text=f"{value}%")
+
     def _on_font_size_edit(self, role):
         if self._loading_font_sizes:
             return
@@ -531,6 +551,7 @@ class SettingsApp:
             "orientation": self.orientation.get(),
             "font_sizes": {o: dict(v) for o, v in self.font_sizes.items()},
             "invert": self.invert.get(),
+            "brightness": self.brightness.get(),
             "mangohud_when_active_only": self.mangohud_when_active_only.get(),
         }
 

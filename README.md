@@ -37,7 +37,7 @@ Two firmware quirks discovered during reverse engineering, both handled by the d
 
 This cheap firmware also tends to accumulate bad internal state after repeated USB claim/release cycles (e.g. passing the device between a VM and the host). A plain USB bus reset (`usb.core.Device.reset()`) on startup clears it, and the driver proactively reconnects every 20 seconds as a safety net (brief ~1s flash each cycle).
 
-Brightness control (`LIG` command) exists in the protocol but only produces a brief flash before reverting to the panel's own default — it does not appear to be a true persistent "set" on this firmware, so the driver does not use it.
+Brightness control (`LIG` command) exists in the protocol but only produces a brief flash before reverting to the panel's own default — it does not appear to be a true persistent "set" on this firmware, so the driver does not use it. The settings GUI's **Brightness** slider (10–100%, `brightness` in `config.json`) dims the rendered frame in software instead, which the preview shows too.
 
 ## Requirements
 

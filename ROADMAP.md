@@ -36,10 +36,11 @@ Legend: `[x]` done · `[ ]` planned · 💡 idea / maybe
   - [x] Portrait grid for vertical orientation, wide hero (4K preferred) for horizontal
   - [x] Per-type disk cache + failure cooldown; `SteamAppId` env-var detection; Cloudflare-safe `User-Agent`
 
-### Colors
+### Appearance (colors + font sizes)
 - [x] Four color roles — label / value / secondary / separator
 - [x] Custom mode — a swatch picker per role
 - [x] Auto mode — derived from the background image via luminance-targeting (keeps the photo's own hue, hits a real perceived-contrast gap)
+- [x] Per-role font sizes (label / value / secondary) next to each color, stored per orientation; all panel text follows them (clock time = value, date = label, music text = secondary), line spacing scales, horizontal columns widen to fit
 
 ### Orientation
 - [x] Vertical (portrait) and Horizontal (landscape) — genuinely different layouts, not a rotation
@@ -48,7 +49,7 @@ Legend: `[x]` done · `[ ]` planned · 💡 idea / maybe
 
 ### Settings GUI (`risemode_gui.py`)
 - [x] Tkinter app; live preview identical to panel output; Apply writes `config.json` (picked up live)
-- [x] Resizable; Display / Background / Sensors / Colors / Live preview sections
+- [x] Resizable; Display / Background / Appearance / Sensors / Live preview sections
 - [x] Comboboxes for background source and color mode
 - [x] Custom `Switch` widget (iOS-style toggle), sized to the row text
 - [x] Menu shortcut + dock/taskbar icon association (`WM_CLASS` / `StartupWMClass`)

@@ -125,6 +125,37 @@ COLOR_LABELS = {
     "separator": "Separator line",
 }
 
+# Text size per colour role (the separator is a line, not text, so it has no
+# size). Stored per orientation because the two layouts have different base
+# sizes - the numbers are the literal pixel sizes of that layout's text, and
+# the defaults are exactly what the layouts always used, so nothing changes
+# until a size is edited.
+FONT_SIZE_ROLES = ("label", "value", "secondary")
+DEFAULT_FONT_SIZES = {
+    "vertical":   {"label": 36, "value": 64, "secondary": 36},
+    "horizontal": {"label": 24, "value": 46, "secondary": 22},
+}
+MIN_FONT_SIZE, MAX_FONT_SIZE = 10, 150
+
+
+def _clean_font_size(value, default):
+    """`value` as an int within the allowed range, else `default` - a hand-
+    edited or corrupt config just falls back instead of breaking rendering."""
+    try:
+        size = int(value)
+    except (TypeError, ValueError):
+        return default
+    return size if MIN_FONT_SIZE <= size <= MAX_FONT_SIZE else default
+
+
+def get_font_sizes(config, orientation):
+    """The label/value/secondary text sizes for `orientation`, from a config
+    dict (falling back per-role to the defaults)."""
+    saved = (config.get("font_sizes") or {}).get(orientation) or {}
+    defaults = DEFAULT_FONT_SIZES[orientation]
+    return {role: _clean_font_size(saved.get(role), defaults[role]) for role in FONT_SIZE_ROLES}
+
+
 COLOR_MODES = ("custom", "auto")
 COLOR_MODE_LABELS = {
     "custom": "Custom",
@@ -182,6 +213,7 @@ def load_config():
         "colors": colors,
         "color_mode": color_mode,
         "orientation": orientation,
+        "font_sizes": {o: get_font_sizes(data, o) for o in ORIENTATIONS},
         "invert": bool(data.get("invert", False)),
         "mangohud_when_active_only": bool(data.get("mangohud_when_active_only", False)),
     }
@@ -394,10 +426,10 @@ _font_cache = {}
 
 
 def _font(size):
-    """Memoized load_font() - the music block picks font sizes relative to
-    its own box height (which differs by orientation), so it can't just use
-    the fixed FONT_* constants; this keeps it from re-reading the TTF on
-    every frame."""
+    """Memoized load_font(). Text sizes are user-configurable (see
+    DEFAULT_FONT_SIZES) and the music block derives its own from its box, so
+    fonts are requested by size on the fly; this keeps that from re-reading
+    the TTF on every frame."""
     f = _font_cache.get(size)
     if f is None:
         f = _font_cache[size] = load_font(size)
@@ -501,16 +533,6 @@ def _draw_runs(draw, x, y, runs, fill):
         draw.text((x, y), s, font=font, fill=fill)
         x += draw.textlength(s, font=font)
 
-FONT_DATE = load_font(38)
-FONT_BIG = load_font(64)
-FONT_MED = load_font(36)
-
-# Horizontal orientation's canvas is only WIDTH (462px) tall, vs. vertical's
-# HEIGHT (1920px) - a label/value/secondary column has to fit in far less
-# vertical space, hence the smaller sizes.
-FONT_LABEL_H = load_font(24)
-FONT_VALUE_H = load_font(46)
-FONT_SECONDARY_H = load_font(22)
 
 
 def get_wallpaper_path():
@@ -1084,7 +1106,8 @@ def _draw_progress_bar(draw, x, y, w, h, progress, colors):
                                fill=tuple(colors["label"]))
 
 
-def _draw_music_block(img, draw, box, art_path, title, artist, progress, colors, stacked=False):
+def _draw_music_block(img, draw, box, art_path, title, artist, progress, colors, stacked=False,
+                      text_scale=1.0):
     """Draws the "now playing" widget into `box` (x, y, w, h).
 
     stacked=False (landscape strip): rounded thumbnail on the left, title
@@ -1097,7 +1120,9 @@ def _draw_music_block(img, draw, box, art_path, title, artist, progress, colors,
     there gets the whole width rather than a cramped strip beside the art.
 
     Title/artist that don't fit their line marquee-scroll (see
-    _draw_text_line). `art_path` None draws a note-glyph placeholder."""
+    _draw_text_line). `art_path` None draws a note-glyph placeholder.
+    `text_scale` multiplies the title/artist font size (1.0 = the default
+    look) - the Appearance section's secondary size drives it."""
     x, y, w, h = box
     title = title or "Unknown"
     artist = artist or ""
@@ -1110,7 +1135,7 @@ def _draw_music_block(img, draw, box, art_path, title, artist, progress, colors,
         img.paste(thumb, (x + (w - art_size) // 2, y), mask)
 
         cy = y + art_size + round(w * 0.05)
-        line_font = _font(round(w * 0.083))
+        line_font = _font(round(w * 0.083 * text_scale))
         cy += _draw_text_line(img, draw, x, cy, w, title, line_font, value, align="center")
         cy += round(w * 0.03)
         if artist:
@@ -1128,7 +1153,7 @@ def _draw_music_block(img, draw, box, art_path, title, artist, progress, colors,
 
     text_x = art_x + art_size + round(h * 0.10)
     text_w = max(1, x + w - pad - text_x)
-    line_font = _font(round(h * 0.19))
+    line_font = _font(round(h * 0.19 * text_scale))
     th, _ = _line_height(draw, title, line_font)
     ah = _line_height(draw, artist, line_font)[0] if artist else 0
     line_gap = round(h * 0.09)
@@ -1145,44 +1170,67 @@ def _draw_music_block(img, draw, box, art_path, title, artist, progress, colors,
         _draw_progress_bar(draw, text_x, cy, text_w, bar_h, progress, colors)
 
 
-def _draw_device_block(draw, y, label, value_text, secondary_parts, colors):
+def _vpitch(base_px, size, role):
+    """A vertical-layout line pitch (`base_px` at the default size for
+    `role`) scaled with the chosen text size, so bigger/smaller text keeps
+    the same proportional breathing room instead of overlapping or leaving
+    gaps. At the default size this is exactly `base_px`."""
+    return round(base_px * size / DEFAULT_FONT_SIZES["vertical"][role])
+
+
+def _draw_device_block(draw, y, label, value_text, secondary_parts, colors, sizes):
     """Draws one `LABEL` / big-value block with optional smaller secondary
     readings (temperature, VRAM, power, ...) packed onto a single line right
     below it - the shared "device" visual theme CPU and GPU both use in the
     vertical layout (a stack of these, top to bottom). secondary_parts is a
     list of text strings (colors["secondary"] is used for all of them -
     callers used to pass a color per part, but every caller always passed
-    the same one anyway); pass [] for none."""
-    draw.text((20, y), label, font=FONT_MED, fill=tuple(colors["label"]))
-    y += 44
+    the same one anyway); pass [] for none. `sizes` is the label/value/
+    secondary size dict (see get_font_sizes)."""
+    f_label, f_value, f_sec = (_font(sizes[r]) for r in FONT_SIZE_ROLES)
+    draw.text((20, y), label, font=f_label, fill=tuple(colors["label"]))
+    y += _vpitch(44, sizes["label"], "label")
     if value_text is not None:  # None = usage toggle off, temp/etc. still on
-        draw.text((20, y), value_text, font=FONT_BIG, fill=tuple(colors["value"]))
-        y += 70 if secondary_parts else 90
+        draw.text((20, y), value_text, font=f_value, fill=tuple(colors["value"]))
+        y += _vpitch(70 if secondary_parts else 90, sizes["value"], "value")
     if secondary_parts:
         x = 20
+        gap = _vpitch(24, sizes["secondary"], "secondary")
+        if len(secondary_parts) > 1:
+            # a big secondary size can push the line past the panel edge -
+            # tighten the gaps between readings (down to a small minimum)
+            text_w = sum(draw.textlength(t, font=f_sec) for t in secondary_parts)
+            room = (draw.im.size[0] - 40 - text_w) / (len(secondary_parts) - 1)
+            gap = max(8, min(gap, room))
         for text in secondary_parts:
-            draw.text((x, y), text, font=FONT_MED, fill=tuple(colors["secondary"]))
-            x += draw.textlength(text, font=FONT_MED) + 24
-        y += 60
+            draw.text((x, y), text, font=f_sec, fill=tuple(colors["secondary"]))
+            x += draw.textlength(text, font=f_sec) + gap
+        y += _vpitch(60, sizes["secondary"], "secondary")
     return y
 
 
 # Distance from the vertical layout's bottom edge up to the top of the
-# clock's time line (the date sits 70px below it). The music widget anchors
-# 40px above this too, so moving the clock moves both together.
-VERTICAL_CLOCK_TOP_FROM_BOTTOM = 170
+# date line; the time sits one time-line pitch above it, and the music
+# widget anchors 40px above whichever of the two is topmost - so moving this
+# moves the whole clock group together.
+VERTICAL_DATE_TOP_FROM_BOTTOM = 100
 
 
 def _render_vertical(img, draw, canvas_w, canvas_h, sensors, cpu, mem, cpu_temp,
                       gpu_load, gpu_temp, gpu_vram_used, gpu_power,
-                      fps, fps_low1, frametime, colors, music):
+                      fps, fps_low1, frametime, colors, music, sizes):
     """The original portrait layout: one column, each enabled block stacked
     top to bottom (CPU, RAM, GPU, a separator, FPS/1% low/frame time), with
     the clock (and the now-playing widget just above it) pinned to the
-    bottom regardless of what's above them."""
+    bottom regardless of what's above them. `sizes` is the label/value/
+    secondary text size dict for this layout; line spacing scales with it
+    (see _vpitch)."""
     label_color = tuple(colors["label"])
     value_color = tuple(colors["value"])
     separator_color = tuple(colors["separator"])
+    f_label, f_value, _f_sec = (_font(sizes[r]) for r in FONT_SIZE_ROLES)
+    label_pitch = _vpitch(44, sizes["label"], "label")      # label -> its value
+    value_pitch = _vpitch(90, sizes["value"], "value")      # value -> next block
 
     y = 40
     if sensors.get("cpu", True) or sensors.get("cpu_temp", True):
@@ -1190,10 +1238,10 @@ def _render_vertical(img, draw, canvas_w, canvas_h, sensors, cpu, mem, cpu_temp,
         secondary = []
         if sensors.get("cpu_temp", True) and cpu_temp is not None:
             secondary.append(f"{cpu_temp:.0f}°C")
-        y = _draw_device_block(draw, y, "CPU", primary, secondary, colors)
+        y = _draw_device_block(draw, y, "CPU", primary, secondary, colors, sizes)
 
     if sensors.get("ram", True):
-        y = _draw_device_block(draw, y, "RAM", f"{mem:.0f}%", [], colors)
+        y = _draw_device_block(draw, y, "RAM", f"{mem:.0f}%", [], colors, sizes)
 
     if sensors.get("gpu", True) and gpu_load is not None:
         secondary = []
@@ -1203,62 +1251,68 @@ def _render_vertical(img, draw, canvas_w, canvas_h, sensors, cpu, mem, cpu_temp,
             secondary.append(f"{gpu_vram_used / 1024:.1f}GB")
         if sensors.get("gpu_power", True) and gpu_power is not None:
             secondary.append(f"{gpu_power:.0f}W")
-        y = _draw_device_block(draw, y, "GPU", f"{gpu_load:.0f}%", secondary, colors)
+        y = _draw_device_block(draw, y, "GPU", f"{gpu_load:.0f}%", secondary, colors, sizes)
 
     if sensors.get("fps", True) or sensors.get("frametime", True):
         y += 30
         draw.line([(20, y), (canvas_w - 20, y)], fill=separator_color, width=2)
         y += 30
 
+    def stat(label, text):
+        nonlocal y
+        draw.text((20, y), label, font=f_label, fill=label_color)
+        y += label_pitch
+        draw.text((20, y), text, font=f_value, fill=value_color)
+        y += value_pitch
+
     if sensors.get("fps", True):
-        draw.text((20, y), "FPS", font=FONT_MED, fill=label_color)
-        y += 44
-        draw.text((20, y), f"{fps:.1f}" if fps is not None else "--", font=FONT_BIG, fill=value_color)
-        y += 90
-
+        stat("FPS", f"{fps:.1f}" if fps is not None else "--")
     if sensors.get("fps_low1", True):
-        draw.text((20, y), "1% LOW", font=FONT_MED, fill=label_color)
-        y += 44
-        draw.text((20, y), f"{fps_low1:.1f}" if fps_low1 is not None else "--", font=FONT_BIG, fill=value_color)
-        y += 90
-
+        stat("1% LOW", f"{fps_low1:.1f}" if fps_low1 is not None else "--")
     if sensors.get("frametime", True):
-        draw.text((20, y), "FRAME TIME", font=FONT_MED, fill=label_color)
-        y += 44
-        draw.text((20, y), f"{frametime:.1f}ms" if frametime is not None else "--", font=FONT_BIG, fill=value_color)
-        y += 90
+        stat("FRAME TIME", f"{frametime:.1f}ms" if frametime is not None else "--")
 
     # Time and date are independent toggles, each with its own fixed slot -
     # switching one off never moves the other. The music widget anchors
     # above whichever of the two is topmost (or the bottom edge if neither).
     show_time = sensors.get("clock", True)
     show_date = sensors.get("date", True)
-    time_y = canvas_h - VERTICAL_CLOCK_TOP_FROM_BOTTOM
-    date_y = time_y + 70
+    # The time is value-role text (value size); the date is drawn in the
+    # label colour so it follows the label size. The date anchors to the
+    # bottom (pushed up only if a big size would run off the canvas) and the
+    # time sits one value-size-scaled line above it - so a bigger time grows
+    # upward rather than into the date.
+    date_bottom = draw.textbbox((0, 0), "00/00/0000", font=f_label)[3]
+    date_y = min(canvas_h - VERTICAL_DATE_TOP_FROM_BOTTOM, canvas_h - 12 - date_bottom)
+    time_y = date_y - _vpitch(70, sizes["value"], "value")
     clock_top = time_y if show_time else (date_y if show_date else None)
 
     if sensors.get("music", True) and music:
         bw = canvas_w - 40
+        # The widget's title/artist text follows the secondary size (both
+        # share one size, per the earlier request), scaled from its own
+        # box-relative base so the default look is unchanged.
+        text_scale = sizes["secondary"] / DEFAULT_FONT_SIZES["vertical"]["secondary"]
         # art (~0.55*w) + room for the two centered text lines and the bar
-        block_h = round(bw * 0.55) + round(bw * 0.34)
+        block_h = round(bw * 0.55) + round(bw * 0.34 * text_scale)
         block_bottom = (clock_top - 40) if clock_top is not None else (canvas_h - 40)
         _draw_music_block(
             img, draw, (20, block_bottom - block_h, bw, block_h),
             _fetch_album_art(music.get("art_url")),
             music.get("title"), music.get("artist"), _music_progress(music), colors,
-            stacked=True,
+            stacked=True, text_scale=text_scale,
         )
 
     for shown, text, font, fill, y in (
-        (show_time, time.strftime("%H:%M:%S"), FONT_BIG, value_color, time_y),
-        (show_date, time.strftime("%d/%m/%Y"), FONT_DATE, label_color, date_y),
+        (show_time, time.strftime("%H:%M:%S"), f_value, value_color, time_y),
+        (show_date, time.strftime("%d/%m/%Y"), f_label, label_color, date_y),
     ):
         if shown:
             tw = draw.textlength(text, font=font)
             draw.text(((canvas_w - tw) / 2, y), text, font=font, fill=fill)
 
 
-def _draw_column(draw, x0, col_width, canvas_h, label, value_text, secondary_text, colors):
+def _draw_column(draw, x0, col_width, canvas_h, label, value_text, secondary_text, colors, sizes):
     """Draws one label/value/secondary group centered (both axes) within a
     column of the given width - the horizontal layout's equivalent of
     _draw_device_block, since a short, wide canvas has room for several of
@@ -1267,11 +1321,11 @@ def _draw_column(draw, x0, col_width, canvas_h, label, value_text, secondary_tex
     also shows with no label above it, just the time then the date)."""
     lines = []
     if label:
-        lines.append((label, FONT_LABEL_H, tuple(colors["label"])))
+        lines.append((label, _font(sizes["label"]), tuple(colors["label"])))
     if value_text is not None:  # None = just the small secondary line (date-only clock)
-        lines.append((value_text, FONT_VALUE_H, tuple(colors["value"])))
+        lines.append((value_text, _font(sizes["value"]), tuple(colors["value"])))
     if secondary_text:
-        lines.append((secondary_text, FONT_SECONDARY_H, tuple(colors["secondary"])))
+        lines.append((secondary_text, _font(sizes["secondary"]), tuple(colors["secondary"])))
     if not lines:
         return
 
@@ -1285,9 +1339,46 @@ def _draw_column(draw, x0, col_width, canvas_h, label, value_text, secondary_tex
         y += h + gap
 
 
+def _column_widths(draw, columns, sizes, total_w, pad=24):
+    """Column widths for the horizontal layout. Columns are equal by default,
+    but a big font size can make one's text wider than its equal share (the
+    clock's time, mostly) - such a column keeps its natural width and the
+    rest split what's left, so nothing gets clipped or overlaps a neighbour.
+    If even that doesn't fit, everything scales down proportionally."""
+    fonts = (("label", 0), ("value", 1), ("secondary", 2))
+    naturals = []
+    for column in columns:
+        w = 0
+        for role, idx in fonts:
+            text = column[idx]
+            if text:
+                w = max(w, draw.textlength(text, font=_font(sizes[role])))
+        naturals.append(w + pad)
+
+    if sum(naturals) >= total_w:
+        scale = total_w / sum(naturals)
+        return [n * scale for n in naturals]
+
+    widths = [None] * len(columns)
+    free = list(range(len(columns)))
+    remaining = total_w
+    while free:
+        share = remaining / len(free)
+        wide = [i for i in free if naturals[i] > share]
+        if not wide:
+            for i in free:
+                widths[i] = share
+            break
+        for i in wide:
+            widths[i] = naturals[i]
+            remaining -= naturals[i]
+            free.remove(i)
+    return widths
+
+
 def _render_horizontal(img, draw, canvas_w, canvas_h, sensors, cpu, mem, cpu_temp,
                         gpu_load, gpu_temp, gpu_vram_used, gpu_power,
-                        fps, fps_low1, frametime, colors, music):
+                        fps, fps_low1, frametime, colors, music, sizes):
     """The landscape layout: since the canvas is short (canvas_h is the
     panel's native WIDTH, 462px) but wide (canvas_w is its native HEIGHT,
     1920px), there's no room to stack blocks vertically the way the
@@ -1337,13 +1428,15 @@ def _render_horizontal(img, draw, canvas_w, canvas_h, sensors, cpu, mem, cpu_tem
 
     columns = system_cols + game_cols
     if columns:
-        col_width = canvas_w / len(columns)
-        for i, (label, value_text, secondary_text) in enumerate(columns):
-            _draw_column(draw, i * col_width, col_width, content_h,
-                         label, value_text, secondary_text, colors)
+        widths = _column_widths(draw, columns, sizes, canvas_w)
+        x = 0
+        for (label, value_text, secondary_text), col_width in zip(columns, widths):
+            _draw_column(draw, x, col_width, content_h,
+                         label, value_text, secondary_text, colors, sizes)
+            x += col_width
 
         if system_cols and game_cols:
-            sep_x = len(system_cols) * col_width
+            sep_x = sum(widths[:len(system_cols)])
             margin = content_h * 0.2
             draw.line([(sep_x, margin), (sep_x, content_h - margin)],
                       fill=tuple(colors["separator"]), width=2)
@@ -1353,6 +1446,7 @@ def _render_horizontal(img, draw, canvas_w, canvas_h, sensors, cpu, mem, cpu_tem
             img, draw, (20, content_h, canvas_w - 40, music_strip_h - 12),
             _fetch_album_art(music.get("art_url")),
             music.get("title"), music.get("artist"), _music_progress(music), colors,
+            text_scale=sizes["secondary"] / DEFAULT_FONT_SIZES["horizontal"]["secondary"],
         )
 
 
@@ -1410,7 +1504,8 @@ def render_stats_pil(config=None):
     render_fn = _render_horizontal if orientation == "horizontal" else _render_vertical
     render_fn(img, draw, canvas_w, canvas_h, sensors, cpu, mem, cpu_temp,
               gpu_load, gpu_temp, gpu_vram_used, gpu_power,
-              fps, fps_low1, frametime, colors, music)
+              fps, fps_low1, frametime, colors, music,
+              get_font_sizes(config, orientation))
 
     return img
 

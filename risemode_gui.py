@@ -253,7 +253,7 @@ class SettingsApp:
         self._sync_wp_state()
 
         # --- Colors ---
-        colors_frame = ttk.LabelFrame(controls, text="Colors", padding=SECTION_PADDING)
+        colors_frame = ttk.LabelFrame(controls, text="Appearance", padding=SECTION_PADDING)
         colors_frame.pack(fill="x", pady=(0, SECTION_GAP))
 
         self.color_mode = tk.StringVar(value=config.get("color_mode", "custom"))
@@ -270,6 +270,13 @@ class SettingsApp:
         self.color_mode_combo.bind("<<ComboboxSelected>>", self._on_color_mode_selected)
 
         self.colors = {k: list(config["colors"][k]) for k in pr.COLOR_LABELS}
+        # Text sizes are per orientation (the two layouts have different base
+        # sizes), but the spinboxes only ever show the current orientation's -
+        # they swap when the orientation combobox changes (see
+        # _sync_font_size_vars). The separator is a line, so no size for it.
+        self.font_sizes = {o: dict(config["font_sizes"][o]) for o in pr.ORIENTATIONS}
+        self.font_size_vars = {}
+        self._loading_font_sizes = False
         self.color_buttons = {}
         for key, label in pr.COLOR_LABELS.items():
             row = ttk.Frame(colors_frame)
@@ -279,6 +286,17 @@ class SettingsApp:
                              command=lambda k=key: self._pick_color(k))
             btn.pack(side="left")
             self.color_buttons[key] = btn
+            if key in pr.FONT_SIZE_ROLES:
+                var = tk.StringVar(value=str(self.font_sizes[self.orientation.get()][key]))
+                var.trace_add("write", lambda *_a, k=key: self._on_font_size_edit(k))
+                self.font_size_vars[key] = var
+                spin = ttk.Spinbox(row, from_=pr.MIN_FONT_SIZE, to=pr.MAX_FONT_SIZE,
+                                   width=4, textvariable=var)
+                spin.pack(side="left", padx=(12, 4))
+                # leaving the box with a half-typed/invalid value snaps it
+                # back to the last valid one instead of showing junk
+                spin.bind("<FocusOut>", lambda _e: self._sync_font_size_vars())
+                ttk.Label(row, text="px").pack(side="left")
         self._sync_color_mode_state()
 
         # --- Sensors / MangoHud Sensors / Extra Features ---
@@ -454,8 +472,28 @@ class SettingsApp:
         self.color_mode.set(self._color_mode_by_label[self.color_mode_combo.get()])
         self._sync_color_mode_state()
 
+    def _on_font_size_edit(self, role):
+        if self._loading_font_sizes:
+            return
+        try:
+            size = int(self.font_size_vars[role].get())
+        except ValueError:
+            return  # mid-typing (empty/partial) - keep the last valid size
+        if pr.MIN_FONT_SIZE <= size <= pr.MAX_FONT_SIZE:
+            self.font_sizes[self.orientation.get()][role] = size
+
+    def _sync_font_size_vars(self):
+        """Puts the current orientation's stored sizes into the spinboxes."""
+        self._loading_font_sizes = True
+        try:
+            for role, var in self.font_size_vars.items():
+                var.set(str(self.font_sizes[self.orientation.get()][role]))
+        finally:
+            self._loading_font_sizes = False
+
     def _on_orientation_selected(self, _event=None):
         self.orientation.set(self._orientation_by_label[self.orientation_combo.get()])
+        self._sync_font_size_vars()
         self._apply_layout_mode()  # re-arranges controls/preview and re-fits the preview
 
     def _sync_color_mode_state(self):
@@ -491,6 +529,7 @@ class SettingsApp:
             "colors": {k: list(v) for k, v in self.colors.items()},
             "color_mode": self.color_mode.get(),
             "orientation": self.orientation.get(),
+            "font_sizes": {o: dict(v) for o, v in self.font_sizes.items()},
             "invert": self.invert.get(),
             "mangohud_when_active_only": self.mangohud_when_active_only.get(),
         }

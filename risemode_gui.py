@@ -23,6 +23,7 @@ PREVIEW_WIDTH = round(pr.WIDTH * PREVIEW_HEIGHT / pr.HEIGHT)
 SNAP_SCREEN_PX = 8  # how close (on screen) a dragged widget's center has to get to
                     # the canvas center before it snaps onto it
 GUIDE_COLOR = "#ff4081"  # the center guide lines shown while snapped
+THEME_POLL_MS = 2000  # how often to check whether the system switched light/dark
 PREVIEW_REFRESH_MS = 250  # low enough for the marquee scroll and the clock
                           # seconds to look live in the preview
 
@@ -76,6 +77,41 @@ WM_CLASS = "risemode-settings"
 ICON_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icon.png")
 
 
+PALETTES = {
+    "light": {
+        "bg": "#f2f2f2", "fg": "#2e2e2e", "field": "#ffffff", "button": "#e2e2e2",
+        "button_hover": "#d6d6d6", "border": "#b5b5b5", "muted": "#777777",
+        "disabled": "#9b9b9b", "trough": "#b9b9b9", "switch_off": "#b0b0b0",
+        "switch_disabled": "#d5d5d5", "accent": "#3584e4",
+    },
+    "dark": {
+        "bg": "#2b2b2b", "fg": "#eeeeee", "field": "#383838", "button": "#3d3d3d",
+        "button_hover": "#4a4a4a", "border": "#565656", "muted": "#9a9a9a",
+        "disabled": "#777777", "trough": "#555555", "switch_off": "#666666",
+        "switch_disabled": "#444444", "accent": "#3584e4",
+    },
+}
+
+
+def system_prefers_dark():
+    """Whether the desktop is in dark mode: GNOME's `color-scheme`, or -
+    on releases that predate it - whether the GTK theme's name says "dark".
+    Light when neither can be read."""
+    def gsetting(key):
+        try:
+            return subprocess.check_output(
+                ["gsettings", "get", "org.gnome.desktop.interface", key],
+                timeout=1, stderr=subprocess.DEVNULL,
+            ).decode().strip().strip("'\"")
+        except (subprocess.SubprocessError, OSError):
+            return None
+
+    scheme = gsetting("color-scheme")
+    if scheme in ("prefer-dark", "prefer-light"):
+        return scheme == "prefer-dark"
+    return "dark" in (gsetting("gtk-theme") or "").lower()
+
+
 class Switch(tk.Canvas):
     """An on/off switch (ttk has no such style built in on Linux) - draws a
     sliding knob on a pill-shaped track, toggled by a click anywhere on it.
@@ -103,6 +139,8 @@ class Switch(tk.Canvas):
                           highlightthickness=0, bd=0, bg=bg, cursor="hand2")
         self.variable = variable
         self.command = command
+        self.off_color = self.OFF_COLOR
+        self.disabled_color = "#d5d5d5"
         self.bind("<Button-1>", self._on_click)
         variable.trace_add("write", lambda *_a: self._redraw())
         self._redraw()
@@ -117,9 +155,9 @@ class Switch(tk.Canvas):
     def _redraw(self):
         self.delete("all")
         on = bool(self.variable.get())
-        color = self.ON_COLOR if on else self.OFF_COLOR
+        color = self.ON_COLOR if on else self.off_color
         if str(self["state"]) == "disabled":
-            color = "#d5d5d5"
+            color = self.disabled_color
         r = self.HEIGHT / 2
         self.create_oval(0, 0, self.HEIGHT, self.HEIGHT, fill=color, outline=color)
         self.create_oval(self.WIDTH - self.HEIGHT, 0, self.WIDTH, self.HEIGHT,
@@ -129,6 +167,12 @@ class Switch(tk.Canvas):
         knob_x = (self.WIDTH - self.HEIGHT) if on else 0
         self.create_oval(knob_x + pad, pad, knob_x + self.HEIGHT - pad, self.HEIGHT - pad,
                           fill=self.KNOB_COLOR, outline="#888888")
+
+    def set_theme(self, bg, off_color, disabled_color):
+        """Re-colors for a light/dark switch (bg blends into the row behind it)."""
+        self.off_color, self.disabled_color = off_color, disabled_color
+        super().configure(bg=bg)
+        self._redraw()
 
     def configure(self, **kwargs):
         # "state" needs a re-draw (disabled renders grayed-out) on top of
@@ -161,6 +205,8 @@ class SettingsApp:
         style.configure(".", font=default_font)
         style.configure("TLabelframe.Label", font=bold_font)
         style.configure("Heading.TLabel", font=bold_font)
+        self._dark = system_prefers_dark()
+        self._apply_theme()
 
         # How tall a Switch needs to be to match a row's own label text -
         # measured directly from a throwaway label at the app's actual
@@ -323,11 +369,11 @@ class SettingsApp:
         self.game_key_entry.pack(side="left", padx=6, fill="x", expand=True)
         self.game_key_hint = ttk.Label(
             wp_frame, text="Get a free key at steamgriddb.com/profile/preferences",
-            foreground="#888888", padding=(20, 0, 0, 0), font=self._ui_font(-2)
+            style="Muted.TLabel", padding=(20, 0, 0, 0), font=self._ui_font(-2)
         )
         self.game_key_hint.pack(anchor="w")
         self.game_status_label = ttk.Label(
-            wp_frame, text="", foreground="#888888", padding=(20, 4, 0, 0), font=self._ui_font(-2),
+            wp_frame, text="", style="Muted.TLabel", padding=(20, 4, 0, 0), font=self._ui_font(-2),
         )
         self.game_status_label.pack(anchor="w")
 
@@ -431,7 +477,7 @@ class SettingsApp:
         # --- Apply --- (below the preview, not the controls column)
         self.apply_row = ttk.Frame(preview_body)
         self.apply_row.grid(row=1, column=0, pady=(8, 0))
-        ttk.Label(self.apply_row, text="Drag widgets to move them", foreground="#707070",
+        ttk.Label(self.apply_row, text="Drag widgets to move them", style="Muted.TLabel",
                   font=self._ui_font(-2)).pack(pady=(0, 6))
         button_row = ttk.Frame(self.apply_row)
         button_row.pack()
@@ -443,7 +489,7 @@ class SettingsApp:
             button_row, text="Reset layout", command=self._reset_positions, font=default_font,
         )
         self.reset_button.pack(side="left", padx=(8, 0), ipadx=10, ipady=0)
-        self._apply_default_bg = self.apply_button.cget("background")
+        self._apply_default_bg = self.apply_button.cget("background")  # (re-set by _apply_theme)
 
         self._last_pil_img = None
         self._preview_size = (PREVIEW_WIDTH, PREVIEW_HEIGHT)
@@ -464,8 +510,76 @@ class SettingsApp:
         self.preview_label.bind("<ButtonRelease-1>", self._on_preview_release)
         preview_frame.bind("<Configure>", lambda event: self._on_preview_resize())
 
+        self._apply_theme()  # now that every widget exists
         self._apply_layout_mode()
         self._tick_preview()
+        self.root.after(THEME_POLL_MS, self._poll_theme)
+
+    def _apply_theme(self):
+        """Colors the whole window for light or dark mode (self._dark).
+        Stays on Tk's "default" ttk theme so every layout/size is exactly as
+        it was, and just sets its colors; the plain tk widgets (buttons,
+        switches, the brightness slider, combobox drop-downs) are recolored
+        by walking the widget tree, so this can run again whenever the
+        system's mode changes."""
+        c = PALETTES["dark" if self._dark else "light"]
+        style = ttk.Style()
+        style.configure(".", background=c["bg"], foreground=c["fg"], fieldbackground=c["field"],
+                        bordercolor=c["border"], lightcolor=c["bg"], darkcolor=c["bg"],
+                        troughcolor=c["trough"], insertcolor=c["fg"])
+        style.map(".", foreground=[("disabled", c["disabled"])])
+        style.configure("TLabelframe", bordercolor=c["border"], lightcolor=c["border"],
+                        darkcolor=c["border"])
+        style.configure("Muted.TLabel", foreground=c["muted"])
+        style.configure("TEntry", fieldbackground=c["field"], foreground=c["fg"],
+                        insertcolor=c["fg"], bordercolor=c["border"])
+        style.configure("TCombobox", fieldbackground=c["field"], foreground=c["fg"],
+                        background=c["button"], arrowcolor=c["fg"], bordercolor=c["border"],
+                        selectbackground=c["field"], selectforeground=c["fg"])
+        style.map("TCombobox",
+                  fieldbackground=[("readonly", c["field"]), ("disabled", c["bg"])],
+                  foreground=[("disabled", c["disabled"])],
+                  selectbackground=[("readonly", c["field"])],
+                  selectforeground=[("readonly", c["fg"])])
+        style.configure("TButton", background=c["button"], foreground=c["fg"])
+        style.map("TButton", background=[("active", c["button_hover"])])
+        self.root.configure(bg=c["bg"])
+        self.root.option_add("*TCombobox*Listbox.background", c["field"])
+        self.root.option_add("*TCombobox*Listbox.foreground", c["fg"])
+        self.root.option_add("*TCombobox*Listbox.selectBackground", c["accent"])
+        self.root.option_add("*TCombobox*Listbox.selectForeground", "#ffffff")
+        self._apply_default_bg = c["button"]
+        self._retheme_tk_widgets(self.root, c)
+
+    def _retheme_tk_widgets(self, widget, c):
+        swatches = getattr(self, "color_buttons", {}).values()
+        for child in widget.winfo_children():
+            kind = child.winfo_class()
+            if isinstance(child, Switch):
+                child.set_theme(c["bg"], c["switch_off"], c["switch_disabled"])
+            elif kind == "Button" and child not in swatches:
+                child.configure(bg=c["button"], fg=c["fg"], activebackground=c["button_hover"],
+                                activeforeground=c["fg"], highlightbackground=c["bg"])
+            elif kind == "Scale":
+                child.configure(troughcolor=c["trough"], highlightbackground=c["bg"])
+            elif kind == "TCombobox":
+                # the drop-down list is its own (already created) window
+                try:
+                    popdown = self.root.tk.eval(f"ttk::combobox::PopdownWindow {child}")
+                    self.root.tk.call(f"{popdown}.f.l", "configure",
+                                      "-background", c["field"], "-foreground", c["fg"],
+                                      "-selectbackground", c["accent"],
+                                      "-selectforeground", "#ffffff")
+                except tk.TclError:
+                    pass
+            self._retheme_tk_widgets(child, c)
+
+    def _poll_theme(self):
+        dark = system_prefers_dark()
+        if dark != self._dark:
+            self._dark = dark
+            self._apply_theme()
+        self.root.after(THEME_POLL_MS, self._poll_theme)
 
     def _ui_font(self, delta=0, bold=False):
         """The system UI font at `delta` points off its size (never below

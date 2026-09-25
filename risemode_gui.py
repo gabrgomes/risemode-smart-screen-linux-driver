@@ -305,12 +305,17 @@ class SettingsApp:
                 var = tk.StringVar(value=str(self.font_sizes[self.orientation.get()][key]))
                 var.trace_add("write", lambda *_a, k=key: self._on_font_size_edit(k))
                 self.font_size_vars[key] = var
-                spin = ttk.Spinbox(row, from_=pr.MIN_FONT_SIZE, to=pr.MAX_FONT_SIZE,
-                                   width=4, textvariable=var)
+                # Hand-rolled -/+ buttons around a plain entry: the themed
+                # Spinbox's stacked arrows are only a few px tall here
+                spin = ttk.Frame(row)
                 spin.pack(side="left", padx=(12, 4))
+                self._step_button(spin, "\u2212", key, -1).pack(side="left")
+                entry = ttk.Entry(spin, width=4, textvariable=var, justify="center")
+                entry.pack(side="left", padx=3, ipady=3)
+                self._step_button(spin, "+", key, +1).pack(side="left")
                 # leaving the box with a half-typed/invalid value snaps it
                 # back to the last valid one instead of showing junk
-                spin.bind("<FocusOut>", lambda _e: self._sync_font_size_vars())
+                entry.bind("<FocusOut>", lambda _e: self._sync_font_size_vars())
                 ttk.Label(row, text="px").pack(side="left")
         self._sync_color_mode_state()
 
@@ -486,6 +491,28 @@ class SettingsApp:
     def _on_color_mode_selected(self, _event=None):
         self.color_mode.set(self._color_mode_by_label[self.color_mode_combo.get()])
         self._sync_color_mode_state()
+
+    def _step_button(self, master, text, role, delta):
+        """A -/+ button that changes a font size by delta px on click, and
+        keeps repeating (after a short delay) while held down."""
+        button = ttk.Button(master, text=text, width=2)
+        state = {"job": None}
+
+        def step(first=False):
+            current = self.font_sizes[self.orientation.get()][role]
+            new = max(pr.MIN_FONT_SIZE, min(pr.MAX_FONT_SIZE, current + delta))
+            self.font_size_vars[role].set(str(new))
+            state["job"] = self.root.after(400 if first else 60, step)
+
+        def stop(_event=None):
+            if state["job"] is not None:
+                self.root.after_cancel(state["job"])
+                state["job"] = None
+
+        button.bind("<ButtonPress-1>", lambda _e: step(first=True), add="+")
+        button.bind("<ButtonRelease-1>", stop, add="+")
+        button.bind("<Leave>", stop, add="+")
+        return button
 
     def _on_brightness_change(self, raw):
         value = round(float(raw))

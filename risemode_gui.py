@@ -23,6 +23,7 @@ PREVIEW_WIDTH = round(pr.WIDTH * PREVIEW_HEIGHT / pr.HEIGHT)
 SNAP_SCREEN_PX = 8  # how close (on screen) a dragged widget's center has to get to
                     # the canvas center before it snaps onto it
 GUIDE_COLOR = "#ff4081"  # the center guide lines shown while snapped
+BRIGHTNESS_SAVE_MS = 120  # while dragging the brightness slider: how often it saves
 THEME_POLL_MS = 2000  # how often to check whether the system switched light/dark
 PREVIEW_REFRESH_MS = 250  # low enough for the marquee scroll and the clock
                           # seconds to look live in the preview
@@ -283,9 +284,12 @@ class SettingsApp:
         self.orientation_combo.bind("<<ComboboxSelected>>", self._on_orientation_selected)
 
         # Brightness: percent slider with a live readout. It's the panel's
-        # backlight, set by the driver once Apply saves it - so, unlike the
-        # other settings, the preview can't show it.
+        # backlight, so the preview can't show it - and unlike every other
+        # setting it takes effect as you drag (see _on_brightness_change), not
+        # on Apply, since that's the only way to see what a value looks like.
         self.brightness = tk.IntVar(value=pr.get_brightness(config))
+        self._brightness_ready = False  # ignore the slider's initial set()
+        self._brightness_save_job = None
         brightness_row = ttk.Frame(display_frame)
         brightness_row.pack(fill="x", pady=(6, 0))
         ttk.Label(brightness_row, text="Brightness:", width=11).pack(side="left")
@@ -302,6 +306,7 @@ class SettingsApp:
         )
         self._brightness_scale.pack(side="left", padx=6, fill="x", expand=True)
         self._brightness_scale.set(self.brightness.get())
+        self._brightness_ready = True
 
         # --- Background ---
         wp_frame = ttk.LabelFrame(controls, text="Background", padding=SECTION_PADDING)
@@ -758,6 +763,21 @@ class SettingsApp:
         value = round(float(raw))
         self.brightness.set(value)
         self._brightness_label.configure(text=f"{value}%")
+        if self._brightness_ready and self._brightness_save_job is None:
+            # at most ~8 saves a second while dragging; the last value always
+            # lands because the job reads the slider when it runs
+            self._brightness_save_job = self.root.after(BRIGHTNESS_SAVE_MS, self._save_brightness)
+
+    def _save_brightness(self):
+        """Writes just the brightness into the saved config (the running
+        driver picks it up on its next frame) - not the rest of the window's
+        settings, which stay pending until Apply."""
+        self._brightness_save_job = None
+        value = self.brightness.get()
+        saved = pr.load_config()
+        if saved["brightness"] != value:
+            saved["brightness"] = value
+            pr.save_config(saved)
 
     def _on_font_size_edit(self, role):
         if self._loading_font_sizes:

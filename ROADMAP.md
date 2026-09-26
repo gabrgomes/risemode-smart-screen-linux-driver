@@ -109,6 +109,6 @@ Sync case/component RGB lighting to whatever's currently driving the panel's own
 - [x] Widget positioning — drag widgets around the live preview (per orientation, with a Reset layout button)
 - [x] Snap-to-center guides while dragging (pink line, per axis)
 - 💡 Widget positioning follow-ups: alignment guides against other widgets, resizing widgets, per-widget font sizes
-- [x] Brightness control — Display Settings slider (10–100%) sets the panel's real backlight via `LIG`
+- [x] Brightness control — Display Settings slider (10–100%) sets the panel's real backlight via `LIG`, live as you drag (no Apply)
 - 💡 More MangoHud-derived metrics — the CSV already carries swap, per-core load, etc.
 - 💡 Weather / notification / alert widgets

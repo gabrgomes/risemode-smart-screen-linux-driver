@@ -34,7 +34,7 @@ from dataclasses import dataclass
 import usb.core
 import usb.util
 
-from panel_render import render_stats_image
+from panel_render import get_brightness, get_config, render_stats_image
 
 VENDOR_ID = 0x2100
 PRODUCT_ID = 0x0003
@@ -56,9 +56,10 @@ DIS_PACKET = build_command(b"DIS")  # display on / wake - Windows' first command
 
 
 def build_brightness_packet(value):
-    """LIG: the brightness value is byte 10 (`43 52 54 00 00 4C 49 47 00 00 32`
-    in the Windows capture, 0x32 = 50). Not used by default - the panel
-    doesn't seem to keep it, so brightness is done in software (panel_render)."""
+    """LIG: sets the panel's backlight; the value (0-100) is byte 10
+    (`43 52 54 00 00 4C 49 47 00 00 32` in the Windows capture, 0x32 = 50).
+    It only takes effect once the session has been opened with DIS - and then
+    it persists, no need to resend it."""
     return build_command(b"LIG", 0x00, 0x00, value)
 
 
@@ -82,7 +83,7 @@ class Mode:
     kept only for comparison."""
     name: str
     send_dis: bool               # DIS -> LIG -> frames startup, vs. CONNECT first
-    lig_value: int
+    hardware_brightness: bool     # send LIG (from the config's brightness) - needs DIS
     first_connect_delay_s: float  # windows: first CONNECT this long after DIS
     reconnect_after_s: float      # proactive session teardown/reconnect; 0 = never
     reset_on_reconnect: bool      # USB bus reset on such a periodic reconnect
@@ -93,14 +94,14 @@ class Mode:
 
 
 LEGACY = Mode(
-    name="legacy", send_dis=False, lig_value=0, first_connect_delay_s=0.2,
+    name="legacy", send_dis=False, hardware_brightness=False, first_connect_delay_s=0.2,
     # without DIS the panel goes dark after a second or two while writes keep
     # succeeding; a fresh reset briefly brings it back, hence the timer
     reconnect_after_s=5, reset_on_reconnect=True,
     frame_interval_s=0.15, fixed_rate=False, in_read_timeout_ms=50,
 )
 WINDOWS = Mode(
-    name="windows", send_dis=True, lig_value=0x32,
+    name="windows", send_dis=True, hardware_brightness=True,
     first_connect_delay_s=CONNECT_INTERVAL_S,
     reconnect_after_s=0, reset_on_reconnect=False,
     frame_interval_s=0.062, fixed_rate=True, in_read_timeout_ms=2000,
@@ -167,6 +168,10 @@ def read_firmware_string(dev):
     return "".join(c for c in text if c.isprintable()) or None
 
 
+def configured_brightness():
+    return get_brightness(get_config())
+
+
 def open_session(dev, mode):
     """Everything sent before the first frame. Returns the time the session's
     keep-alive schedule counts from."""
@@ -180,7 +185,7 @@ def open_session(dev, mode):
     dev.write(EP_OUT, DIS_PACKET)
     dis_time = time.time()
     time.sleep(DIS_TO_LIG_S)
-    dev.write(EP_OUT, build_brightness_packet(mode.lig_value))
+    dev.write(EP_OUT, build_brightness_packet(configured_brightness()))
     time.sleep(LIG_TO_FIRST_FRAME_S)
     return dis_time
 
@@ -209,6 +214,7 @@ def run(mode, reset):
         print(f"Device claimed ({mode.name} mode). Opening session...")
         session_start = open_session(dev, mode)
         last_connect = session_start
+        sent_brightness = configured_brightness() if mode.hardware_brightness else None
         next_frame = time.time()
         print("Streaming (Ctrl+C to stop)...")
         while True:
@@ -220,6 +226,13 @@ def run(mode, reset):
             if now - last_connect >= CONNECT_INTERVAL_S:
                 dev.write(EP_OUT, CONNECT_PACKET)
                 last_connect = now
+            if mode.hardware_brightness:
+                # the settings GUI's slider: applied between frames, and only
+                # when it changed (the panel keeps the last value it was given)
+                wanted = configured_brightness()
+                if wanted != sent_brightness:
+                    dev.write(EP_OUT, build_brightness_packet(wanted))
+                    sent_brightness = wanted
             send_frame(dev, render_stats_image())
             next_frame = (next_frame if mode.fixed_rate else time.time()) + mode.frame_interval_s
             delay = next_frame - time.time()

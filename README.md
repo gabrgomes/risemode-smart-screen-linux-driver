@@ -39,7 +39,7 @@ Notes on the firmware, all handled by the driver (the sequence and timing mirror
 
 `risemode_driver.py --mode legacy` runs the old pattern (CONNECT-first, no `DIS`, reconnect + reset every 5s) for comparison; `--reconnect-after`, `--reset-on-reconnect` and `--frame-interval` override individual settings.
 
-Brightness control (`LIG` command) exists in the protocol; the driver sends the Windows app's fixed value (50) at session start but doesn't drive it. (Earlier tests found it only flashed — but those were without `DIS`, so a persistent hardware brightness may work now; not re-tested.) The settings GUI's **Brightness** slider (10–100%, `brightness` in `config.json`) dims the rendered frame in software instead, which the preview shows too.
+**Brightness:** the settings GUI's slider (10–100%, `brightness` in `config.json`, default 50 like the Windows app) sets the panel's real backlight via the `LIG` command (value at byte 10). The driver sends it when a session opens and again whenever the saved value changes (picked up on Apply, between frames); the panel keeps it. It only works on a session opened with `DIS` (an earlier version of this driver never sent `DIS`, which is why `LIG` used to look like it only flashed), so `--mode legacy` ignores it. The live preview can't show it, since it's the backlight, not the image.
 
 ## Requirements
 

@@ -22,7 +22,7 @@ import urllib.request
 from collections import deque
 
 import psutil
-from PIL import Image, ImageDraw, ImageEnhance, ImageFont
+from PIL import Image, ImageDraw, ImageFont
 
 WIDTH, HEIGHT = 462, 1920  # the physical panel's fixed native buffer size -
                            # always portrait, regardless of ORIENTATION below
@@ -178,18 +178,17 @@ def get_positions(config, orientation):
     return out
 
 
-# Panel brightness, in percent. Done in software (the rendered frame is
-# scaled darker) because the protocol's own LIG command isn't a persistent
-# set on this firmware - see the README.
-MIN_BRIGHTNESS, MAX_BRIGHTNESS = 10, 100
+# Panel backlight brightness, in percent - sent to the panel by the driver as
+# the protocol's LIG command (see risemode_driver.py), not applied to the image.
+MIN_BRIGHTNESS, MAX_BRIGHTNESS, DEFAULT_BRIGHTNESS = 10, 100, 50
 
 
 def get_brightness(config):
-    """config's brightness as an int percent within range (100 if missing or
-    invalid)."""
-    value = config.get("brightness", MAX_BRIGHTNESS)
+    """config's brightness as an int percent within range (the Windows app's
+    default, 50, if missing or invalid)."""
+    value = config.get("brightness", DEFAULT_BRIGHTNESS)
     if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return MAX_BRIGHTNESS
+        return DEFAULT_BRIGHTNESS
     return max(MIN_BRIGHTNESS, min(MAX_BRIGHTNESS, round(value)))
 
 
@@ -1899,9 +1898,6 @@ def render_stats_pil(config=None, boxes=None):
         boxes.clear()
         boxes.update(widgets.boxes())
 
-    brightness = get_brightness(config)
-    if brightness < MAX_BRIGHTNESS:
-        img = ImageEnhance.Brightness(img).enhance(brightness / 100)
     return img
 
 

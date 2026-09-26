@@ -59,7 +59,7 @@ Legend: `[x]` done · `[ ]` planned · 💡 idea / maybe
 - [x] Consistent section spacing / margins / alignment across both orientations
 
 ### Parked
-- 💡 Re-test hardware brightness (`LIG`) — earlier tests saw it only flash, but they ran without `DIS`; it may set persistently now, which would beat the software dimming slider (which dims the JPEG, not the backlight)
+- [x] Hardware brightness — re-tested with `DIS` sessions: `LIG` sets the backlight persistently (no flash/revert). The slider now drives it (replacing the old software dimming of the image)
 
 ---
 
@@ -109,6 +109,6 @@ Sync case/component RGB lighting to whatever's currently driving the panel's own
 - [x] Widget positioning — drag widgets around the live preview (per orientation, with a Reset layout button)
 - [x] Snap-to-center guides while dragging (pink line, per axis)
 - 💡 Widget positioning follow-ups: alignment guides against other widgets, resizing widgets, per-widget font sizes
-- [x] Brightness control — software dimming of the rendered frame (Display Settings slider, 10–100%), since the `LIG` command only flashes and doesn't persistently set on this firmware
+- [x] Brightness control — Display Settings slider (10–100%) sets the panel's real backlight via `LIG`
 - 💡 More MangoHud-derived metrics — the CSV already carries swap, per-core load, etc.
 - 💡 Weather / notification / alert widgets

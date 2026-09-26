@@ -282,8 +282,9 @@ class SettingsApp:
         self.orientation_combo.pack(side="left", padx=6, fill="x", expand=True)
         self.orientation_combo.bind("<<ComboboxSelected>>", self._on_orientation_selected)
 
-        # Brightness: percent slider with a live readout. The preview
-        # refreshes on its own timer, so dragging shows up there straight away.
+        # Brightness: percent slider with a live readout. It's the panel's
+        # backlight, set by the driver once Apply saves it - so, unlike the
+        # other settings, the preview can't show it.
         self.brightness = tk.IntVar(value=pr.get_brightness(config))
         brightness_row = ttk.Frame(display_frame)
         brightness_row.pack(fill="x", pady=(6, 0))

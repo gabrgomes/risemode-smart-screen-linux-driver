@@ -620,13 +620,20 @@ def get_wallpaper_path():
     return None
 
 
+# Steam gives "Add a Non-Steam Game" shortcuts (which is what Heroic's
+# "add to Steam" makes) ids with the high bit set - so a Heroic game started
+# from Steam has the launcher itself tagged with such an id. It isn't a real
+# AppID with any art behind it.
+STEAM_SHORTCUT_APPID_MIN = 2 ** 31
+
+
 def _detect_running_game_appid():
     """Best-effort detection of a currently-running game, from environment
     variables the launchers set on every game process they start:
       - Steam sets SteamAppId - the game's Steam AppID, which is exactly what
-        SteamGridDB's API keys off. Proton run by something other than Steam
-        (Heroic's umu, for one) sets it to 0, which isn't a game, so that's
-        ignored.
+        SteamGridDB's API keys off. 0 (what Proton run by something other
+        than Steam, e.g. Heroic's umu, sets) and the huge ids Steam gives its
+        non-Steam-game shortcuts aren't real AppIDs, so those are ignored.
       - Heroic (Epic/GOG/Amazon/sideloaded, Wine or native) sets
         HEROIC_APP_NAME; that's returned as "heroic:<app name>" and its art
         is then looked up by the game's title (see _heroic_game_info()).
@@ -640,7 +647,7 @@ def _detect_running_game_appid():
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, OSError):
                 continue
             appid = env.get("SteamAppId")
-            if appid and appid.isdigit() and appid != "0":
+            if appid and appid.isdigit() and 0 < int(appid) < STEAM_SHORTCUT_APPID_MIN:
                 return appid
             name = env.get("HEROIC_APP_NAME")
             if name and heroic is None:

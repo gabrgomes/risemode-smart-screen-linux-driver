@@ -8,11 +8,11 @@ Protocol reverse-engineered from a USB capture of the official Windows app:
   - Panel is 462 x 1920, image expected as a plain JPEG rotated 180 degrees.
   - A frame is sent as: 32-byte header + JPEG bytes, chunked into 1024-byte
     packets (last packet zero-padded).
-  - A CONNECT keep-alive must be resent roughly every 10 seconds or the panel
-    drops the session and blanks.
-  - The official Windows app opens a session with DIS, then LIG (brightness),
-    then frames; see docs/windows-capture/PROTOCOL.md and the "windows" mode
-    below.
+  - A session must open with DIS (then LIG, then frames), like the official
+    Windows app does: DIS takes the firmware out of idle mode. Without it the
+    panel stays dark while every write "succeeds" - that was the long-standing
+    "firmware wedge", not a real one. See docs/windows-capture/PROTOCOL.md.
+  - A CONNECT keep-alive is resent every 10 seconds.
   - Do not call set_configuration() when the device is already configured -
     on this firmware it silently caps the session to about a second.
 
@@ -76,9 +76,10 @@ def build_draw_header(jpeg_len):
 
 @dataclass(frozen=True)
 class Mode:
-    """How a streaming session is run. LEGACY is what shipped originally
-    (and is known to keep the panel alive); WINDOWS copies the official
-    app's traffic pattern - kept separate until it's proven to stay lit."""
+    """How a streaming session is run. WINDOWS copies the official app's
+    traffic pattern (the default). LEGACY is the original driver's pattern -
+    no DIS, so it needs the reconnect/reset cycle to show anything for long;
+    kept only for comparison."""
     name: str
     send_dis: bool               # DIS -> LIG -> frames startup, vs. CONNECT first
     lig_value: int
@@ -93,8 +94,8 @@ class Mode:
 
 LEGACY = Mode(
     name="legacy", send_dis=False, lig_value=0, first_connect_delay_s=0.2,
-    # this firmware was seen to wedge (panel dark while writes succeed) after
-    # a while; a fresh USB reset clears it, so reconnect + reset on a timer
+    # without DIS the panel goes dark after a second or two while writes keep
+    # succeeding; a fresh reset briefly brings it back, hence the timer
     reconnect_after_s=5, reset_on_reconnect=True,
     frame_interval_s=0.15, fixed_rate=False, in_read_timeout_ms=50,
 )
@@ -105,7 +106,8 @@ WINDOWS = Mode(
     frame_interval_s=0.062, fixed_rate=True, in_read_timeout_ms=2000,
 )
 MODES = {m.name: m for m in (LEGACY, WINDOWS)}
-DEFAULT_MODE = "legacy"  # flip to "windows" once the 5-minute test passes
+DEFAULT_MODE = "windows"  # proven stable (see docs/windows-capture); "legacy" is the
+                          # old workaround, kept only for comparison
 
 # Windows' startup timing: (GET_REPORT) -0.08s-> DIS -0.39s-> LIG -0.08s-> frames
 GET_REPORT_TO_DIS_S = 0.08

@@ -30,14 +30,16 @@ Header layout:
 13-31 0x00                padding
 ```
 
-Two firmware quirks discovered during reverse engineering, both handled by the driver:
+Notes on the firmware, all handled by the driver (the sequence and timing mirror the official Windows app, captured with USBPcap — see [`docs/windows-capture/PROTOCOL.md`](docs/windows-capture/PROTOCOL.md)):
 
+- **A session has to start with `DIS`** (`"CRT\0\0DIS"`, zero-padded to 1024 bytes), then `LIG` (brightness byte at offset 10), then frames: `GET_REPORT` → `DIS` → +0.39s `LIG 50` → +0.08s first frame, then ~16 fps. `DIS` takes the firmware out of its idle mode, in which it sends `00 00` on IN endpoint 0x82 every 3s. Without it the panel shows a frame or two and then goes dark while every USB write keeps succeeding — this was misdiagnosed for a long time as a random "firmware wedge" that only periodic USB resets and reconnects papered over. With it, the panel stays lit indefinitely with no resets or reconnects (a 5-minute controlled test, then a long soak with the real driver). `windows_stream_test.py` reproduces both cases (`--no-dis` is the control) and logs whether the 0x82 heartbeat stops.
+- A `CONNECT` keep-alive (`"CRT\0\0CONNECT"`) is sent every 10s, only between frames.
 - Calling `SET_CONFIGURATION` when the device is already configured silently caps the display session to about a second. The driver only sets it if not already configured.
-- A `CONNECT` handshake packet (`"CRT\0\0CONNECT"` zero-padded to 1024 bytes) must be resent roughly every 10 seconds or the panel drops the session and goes black, even though every USB transfer keeps completing successfully.
+- One USB bus reset (`usb.core.Device.reset()`) is done on first startup and after errors, to clear any state left over from an earlier claim (e.g. handing the device between a VM and the host) — not periodically.
 
-This cheap firmware also tends to accumulate bad internal state after repeated USB claim/release cycles (e.g. passing the device between a VM and the host). A plain USB bus reset (`usb.core.Device.reset()`) on startup clears it, and the driver proactively reconnects every 20 seconds as a safety net (brief ~1s flash each cycle).
+`risemode_driver.py --mode legacy` runs the old pattern (CONNECT-first, no `DIS`, reconnect + reset every 5s) for comparison; `--reconnect-after`, `--reset-on-reconnect` and `--frame-interval` override individual settings.
 
-Brightness control (`LIG` command) exists in the protocol but only produces a brief flash before reverting to the panel's own default — it does not appear to be a true persistent "set" on this firmware, so the driver does not use it. The settings GUI's **Brightness** slider (10–100%, `brightness` in `config.json`) dims the rendered frame in software instead, which the preview shows too.
+Brightness control (`LIG` command) exists in the protocol; the driver sends the Windows app's fixed value (50) at session start but doesn't drive it. (Earlier tests found it only flashed — but those were without `DIS`, so a persistent hardware brightness may work now; not re-tested.) The settings GUI's **Brightness** slider (10–100%, `brightness` in `config.json`) dims the rendered frame in software instead, which the preview shows too.
 
 ## Requirements
 
@@ -187,7 +189,7 @@ systemctl --user daemon-reload
 systemctl --user enable --now risemode-screen.service
 ```
 
-If the panel ever goes dark and doesn't self-recover within a proactive-reconnect cycle, `systemctl --user restart risemode-screen` clears it.
+If the panel ever goes dark, `systemctl --user restart risemode-screen` restarts the session (`journalctl --user -u risemode-screen` shows what the driver saw).
 
 ## Debugging tools
 

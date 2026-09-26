@@ -1,0 +1,30 @@
+03:01:25.864 INFO    test frame ~91.4 KB (Windows: 14-81 KB, avg 54)
+03:01:26.623 INFO    listening on 0x82 for 4s before starting (device idle: expect `00 00` every ~3 s)...
+03:01:27.333 INFO    IN 0x82 <- 0000  (t=0.71s)
+03:01:30.333 INFO    IN 0x82 <- 0000  (t=3.71s)
+03:01:30.624 INFO    CONTROL RUN: CONNECT first, no DIS/LIG
+03:01:30.824 INFO    streaming for 300s at 16 fps; no reconnects. Watch the panel.
+03:01:33.333 INFO    IN 0x82 <- 0000  (t=6.71s)
+03:01:36.333 INFO    IN 0x82 <- 0000  (t=9.71s)
+03:01:39.333 INFO    IN 0x82 <- 0000  (t=12.71s)
+03:01:40.824 INFO    CONNECT sent (t=10.00s since session start)
+03:01:40.841 INFO    t= 10s  frames=161  16.1 fps  errors=0  max write 12 ms  IN events since session start: 3
+03:01:42.334 INFO    IN 0x82 <- 0000  (t=15.71s)
+03:01:45.334 INFO    IN 0x82 <- 0000  (t=18.71s)
+03:01:48.334 INFO    IN 0x82 <- 0000  (t=21.71s)
+03:01:50.825 INFO    CONNECT sent (t=20.00s since session start)
+03:01:50.841 INFO    t= 20s  frames=321  16.0 fps  errors=0  max write 12 ms  IN events since session start: 6
+03:01:51.334 INFO    IN 0x82 <- 0000  (t=24.71s)
+03:01:54.334 INFO    IN 0x82 <- 0000  (t=27.71s)
+03:01:57.334 INFO    IN 0x82 <- 0000  (t=30.71s)
+03:02:00.334 INFO    IN 0x82 <- 0000  (t=33.71s)
+03:02:00.887 INFO    CONNECT sent (t=30.06s since session start)
+03:02:00.903 INFO    t= 30s  frames=482  16.0 fps  errors=0  max write 12 ms  IN events since session start: 10
+03:02:03.334 INFO    IN 0x82 <- 0000  (t=36.71s)
+03:02:06.334 INFO    IN 0x82 <- 0000  (t=39.71s)
+03:02:09.334 INFO    IN 0x82 <- 0000  (t=42.71s)
+03:02:10.459 INFO    interrupted
+03:02:11.335 INFO    ============================================================
+03:02:11.335 INFO    frames sent: 634   USB errors: 0   slow writes: 0   max write: 12 ms
+03:02:11.335 INFO    0x82 packets while idle (before session): 2;  after session start: 13
+03:02:11.335 INFO    Now: was the panel still showing the counter at the end? Did it ever go dark or freeze, and at what t?  (full log: windows_stream_test.log)

@@ -1,0 +1,71 @@
+02:54:12.384 INFO    test frame ~91.4 KB (Windows: 14-81 KB, avg 54)
+02:54:13.141 INFO    listening on 0x82 for 4s before starting (device idle: expect `00 00` every ~3 s)...
+02:54:13.873 INFO    IN 0x82 <- 0000  (t=0.73s)
+02:54:16.873 INFO    IN 0x82 <- 0000  (t=3.73s)
+02:54:17.142 INFO    GET_REPORT firmware string: 'V25.RM_SCP92.02.011'
+02:54:17.222 INFO    sent DIS
+02:54:17.613 INFO    sent LIG 50
+02:54:17.693 INFO    streaming for 300s at 16 fps; no reconnects. Watch the panel.
+02:54:27.256 INFO    CONNECT sent (t=10.03s since session start)
+02:54:27.710 INFO    t= 10s  frames=161  16.1 fps  errors=0  max write 13 ms  IN events since session start: 0
+02:54:37.318 INFO    CONNECT sent (t=20.10s since session start)
+02:54:37.772 INFO    t= 21s  frames=322  16.0 fps  errors=0  max write 13 ms  IN events since session start: 0
+02:54:47.318 INFO    CONNECT sent (t=30.10s since session start)
+02:54:47.835 INFO    t= 31s  frames=483  16.0 fps  errors=0  max write 13 ms  IN events since session start: 0
+02:54:57.381 INFO    CONNECT sent (t=40.16s since session start)
+02:54:57.897 INFO    t= 41s  frames=644  16.0 fps  errors=0  max write 13 ms  IN events since session start: 0
+02:55:07.443 INFO    CONNECT sent (t=50.22s since session start)
+02:55:07.897 INFO    t= 51s  frames=804  16.0 fps  errors=0  max write 13 ms  IN events since session start: 0
+02:55:17.506 INFO    CONNECT sent (t=60.28s since session start)
+02:55:17.898 INFO    t= 61s  frames=964  16.0 fps  errors=0  max write 13 ms  IN events since session start: 0
+02:55:27.506 INFO    CONNECT sent (t=70.28s since session start)
+02:55:27.959 INFO    t= 71s  frames=1125  16.0 fps  errors=0  max write 13 ms  IN events since session start: 0
+02:55:37.568 INFO    CONNECT sent (t=80.35s since session start)
+02:55:37.959 INFO    t= 81s  frames=1285  16.0 fps  errors=0  max write 13 ms  IN events since session start: 0
+02:55:47.568 INFO    CONNECT sent (t=90.35s since session start)
+02:55:48.022 INFO    t= 91s  frames=1446  16.0 fps  errors=0  max write 13 ms  IN events since session start: 0
+02:55:57.631 INFO    CONNECT sent (t=100.41s since session start)
+02:55:58.022 INFO    t=101s  frames=1606  16.0 fps  errors=0  max write 13 ms  IN events since session start: 0
+02:56:07.693 INFO    CONNECT sent (t=110.47s since session start)
+02:56:08.085 INFO    t=111s  frames=1767  16.0 fps  errors=0  max write 13 ms  IN events since session start: 0
+02:56:17.693 INFO    CONNECT sent (t=120.47s since session start)
+02:56:18.086 INFO    t=121s  frames=1927  16.0 fps  errors=0  max write 13 ms  IN events since session start: 0
+02:56:27.756 INFO    CONNECT sent (t=130.53s since session start)
+02:56:28.148 INFO    t=131s  frames=2088  16.0 fps  errors=0  max write 13 ms  IN events since session start: 0
+02:56:37.756 INFO    CONNECT sent (t=140.53s since session start)
+02:56:38.148 INFO    t=141s  frames=2248  16.0 fps  errors=0  max write 13 ms  IN events since session start: 0
+02:56:47.756 INFO    CONNECT sent (t=150.53s since session start)
+02:56:48.210 INFO    t=151s  frames=2409  16.0 fps  errors=0  max write 13 ms  IN events since session start: 0
+02:56:57.818 INFO    CONNECT sent (t=160.60s since session start)
+02:56:58.210 INFO    t=161s  frames=2569  16.0 fps  errors=0  max write 13 ms  IN events since session start: 0
+02:57:07.818 INFO    CONNECT sent (t=170.60s since session start)
+02:57:08.272 INFO    t=171s  frames=2730  16.0 fps  errors=0  max write 13 ms  IN events since session start: 0
+02:57:17.818 INFO    CONNECT sent (t=180.60s since session start)
+02:57:18.273 INFO    t=181s  frames=2890  16.0 fps  errors=0  max write 13 ms  IN events since session start: 0
+02:57:27.881 INFO    CONNECT sent (t=190.66s since session start)
+02:57:28.334 INFO    t=191s  frames=3051  16.0 fps  errors=0  max write 13 ms  IN events since session start: 0
+02:57:37.881 INFO    CONNECT sent (t=200.66s since session start)
+02:57:38.397 INFO    t=201s  frames=3212  16.0 fps  errors=0  max write 13 ms  IN events since session start: 0
+02:57:47.943 INFO    CONNECT sent (t=210.72s since session start)
+02:57:48.397 INFO    t=211s  frames=3372  16.0 fps  errors=0  max write 13 ms  IN events since session start: 0
+02:57:58.006 INFO    CONNECT sent (t=220.78s since session start)
+02:57:58.397 INFO    t=221s  frames=3532  16.0 fps  errors=0  max write 14 ms  IN events since session start: 0
+02:58:08.068 INFO    CONNECT sent (t=230.85s since session start)
+02:58:08.398 INFO    t=231s  frames=3692  16.0 fps  errors=0  max write 14 ms  IN events since session start: 0
+02:58:18.131 INFO    CONNECT sent (t=240.91s since session start)
+02:58:18.398 INFO    t=241s  frames=3852  16.0 fps  errors=0  max write 14 ms  IN events since session start: 0
+02:58:28.193 INFO    CONNECT sent (t=250.97s since session start)
+02:58:28.459 INFO    t=251s  frames=4013  16.0 fps  errors=0  max write 14 ms  IN events since session start: 0
+02:58:38.194 INFO    CONNECT sent (t=260.97s since session start)
+02:58:38.459 INFO    t=261s  frames=4173  16.0 fps  errors=0  max write 14 ms  IN events since session start: 0
+02:58:48.256 INFO    CONNECT sent (t=271.03s since session start)
+02:58:48.523 INFO    t=271s  frames=4334  16.0 fps  errors=0  max write 14 ms  IN events since session start: 0
+02:58:58.256 INFO    CONNECT sent (t=281.03s since session start)
+02:58:58.584 INFO    t=281s  frames=4495  16.0 fps  errors=0  max write 14 ms  IN events since session start: 0
+02:59:08.318 INFO    CONNECT sent (t=291.10s since session start)
+02:59:08.584 INFO    t=291s  frames=4655  16.0 fps  errors=0  max write 14 ms  IN events since session start: 0
+02:59:17.936 INFO    ============================================================
+02:59:17.937 INFO    frames sent: 4793   USB errors: 0   slow writes: 0   max write: 14 ms
+02:59:17.937 INFO    0x82 packets while idle (before session): 2;  after session start: 0
+02:59:17.937 INFO    => device heartbeat STOPPED after DIS (matches Windows: DIS accepted)
+02:59:17.937 INFO    Now: was the panel still showing the counter at the end? Did it ever go dark or freeze, and at what t?  (full log: windows_stream_test.log)

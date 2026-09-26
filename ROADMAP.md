@@ -10,7 +10,7 @@ Legend: `[x]` done · `[ ]` planned · 💡 idea / maybe
 
 ### Core driver
 - [x] Native USB HID driver — no Windows, no VM (462×1920 JPEG frames over the interrupt OUT endpoint)
-- [x] Firmware-wedge recovery — periodic `CONNECT` resend + proactive session reconnect + `dev.reset()` on startup. Confirmed necessary via reverse engineering; **not** a bug, do not remove.
+- [x] Panel blackout fixed at the root — the "firmware wedge" was the driver never sending `DIS` (the Windows app's first command); with `DIS` → `LIG` → frames the panel stays lit with no resets or reconnects. Found by capturing the Windows app's USB traffic (`docs/windows-capture/`); verified with `windows_stream_test.py` (with/without `DIS`) and a long real-driver soak. Replaces the old periodic-reset workaround (still available as `--mode legacy`).
 - [x] `systemd --user` service; config hot-reloaded by mtime, no restart needed for `config.json` changes
 - [x] `install.sh` — system deps, udev rule, plugdev group, service, menu shortcut (all idempotent)
 
@@ -59,7 +59,7 @@ Legend: `[x]` done · `[ ]` planned · 💡 idea / maybe
 - [x] Consistent section spacing / margins / alignment across both orientations
 
 ### Parked
-- 💡 Deeper firmware-wedge root cause — protocol-level diffing against the genuine Windows software found no difference (CONNECT bytes, DRAW header, keepalive cadence, USB pacing all matched). VM + udev reverse-engineering setup remains available. Explicitly deferred.
+- 💡 Re-test hardware brightness (`LIG`) — earlier tests saw it only flash, but they ran without `DIS`; it may set persistently now, which would beat the software dimming slider (which dims the JPEG, not the backlight)
 
 ---
 

@@ -1019,13 +1019,15 @@ class SettingsApp:
             appid = pr.get_running_game_appid()
             if appid and bg_path and os.path.dirname(bg_path) in pr.GAME_IMAGE_DIRS:
                 self.game_status_label.configure(
-                    text=f"Game detected (AppID {appid}) - showing its cover art"
+                    text=f"Game detected ({pr.describe_game(appid)}) - showing its cover art"
                 )
             else:
                 fallback = "custom image" if self.wp_mode.get() == "custom" else "desktop wallpaper"
-                self.game_status_label.configure(
-                    text=f"No game detected - showing {fallback}"
-                )
+                if appid:
+                    text = f"Game detected ({pr.describe_game(appid)}) - no art found, showing {fallback}"
+                else:
+                    text = f"No game detected - showing {fallback}"
+                self.game_status_label.configure(text=text)
         self.root.after(PREVIEW_REFRESH_MS, self._tick_preview)
 
 

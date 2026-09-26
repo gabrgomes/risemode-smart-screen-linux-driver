@@ -621,24 +621,87 @@ def get_wallpaper_path():
 
 
 def _detect_running_game_appid():
-    """Best-effort detection of a currently-running Steam game, via the
-    SteamAppId environment variable Steam sets on every game process it
-    launches - this hands us the game's Steam AppID directly (which is
-    exactly what SteamGridDB's API keys off), with no need to guess it from
-    a process/window name. Only catches games actually launched through
-    Steam (including Proton); returns None otherwise, or if nothing is
-    currently running."""
+    """Best-effort detection of a currently-running game, from environment
+    variables the launchers set on every game process they start:
+      - Steam sets SteamAppId - the game's Steam AppID, which is exactly what
+        SteamGridDB's API keys off. Proton run by something other than Steam
+        (Heroic's umu, for one) sets it to 0, which isn't a game, so that's
+        ignored.
+      - Heroic (Epic/GOG/Amazon/sideloaded, Wine or native) sets
+        HEROIC_APP_NAME; that's returned as "heroic:<app name>" and its art
+        is then looked up by the game's title (see _heroic_game_info()).
+    A Steam game wins if both are somehow present. Returns None if nothing
+    is currently running (or it wasn't started by one of those launchers)."""
+    heroic = None
     try:
         for proc in psutil.process_iter():
             try:
-                appid = proc.environ().get("SteamAppId")
+                env = proc.environ()
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, OSError):
                 continue
-            if appid and appid.isdigit():
+            appid = env.get("SteamAppId")
+            if appid and appid.isdigit() and appid != "0":
                 return appid
+            name = env.get("HEROIC_APP_NAME")
+            if name and heroic is None:
+                heroic = f"heroic:{name}"
     except OSError:
         pass
+    return heroic
+
+
+# Where Heroic keeps its config (native install, then the Flatpak's) - its
+# cached store libraries have every owned game's title and art URLs.
+HEROIC_CONFIG_DIRS = (
+    os.path.expanduser("~/.config/heroic"),
+    os.path.expanduser("~/.var/app/com.heroicgameslauncher.hgl/config/heroic"),
+)
+_HEROIC_LIBRARIES = (  # (file under a config dir, key holding the game list)
+    ("store_cache/legendary_library.json", "library"),
+    ("store_cache/gog_library.json", "games"),
+    ("store_cache/nile_library.json", "library"),
+    ("sideload_apps/library.json", "games"),
+)
+_heroic_info_cache = {}
+
+
+def _heroic_game_info(game_id):
+    """{"title", "art_cover", "art_square", "art_background"} for a
+    "heroic:<app name>" game id, from Heroic's cached libraries; None if it
+    isn't in any of them. (Heroic's art_square is the tall/portrait art and
+    art_cover the wide one.)"""
+    app_name = game_id.split(":", 1)[1] if game_id.startswith("heroic:") else game_id
+    if app_name in _heroic_info_cache:
+        return _heroic_info_cache[app_name]
+    for base in HEROIC_CONFIG_DIRS:
+        for filename, key in _HEROIC_LIBRARIES:
+            try:
+                with open(os.path.join(base, filename)) as f:
+                    games = json.load(f).get(key) or []
+            except (OSError, ValueError, AttributeError):
+                continue
+            for game in games:
+                if game.get("app_name") == app_name and game.get("title"):
+                    _heroic_info_cache[app_name] = game
+                    return game
     return None
+
+
+def describe_game(game_id):
+    """Human-readable name for a running-game id, for the GUI's status line."""
+    if game_id and game_id.startswith("heroic:"):
+        info = _heroic_game_info(game_id)
+        return info["title"] if info else game_id.split(":", 1)[1]
+    return f"AppID {game_id}"
+
+
+def _cache_name(game_id):
+    """Filesystem-safe cache file stem for a game id."""
+    return "".join(c if c.isalnum() or c in "._-" else "_" for c in game_id)
+
+
+def _normalize_title(text):
+    return "".join(c for c in (text or "").casefold() if c.isalnum())
 
 
 _game_appid_cache = {"time": 0.0, "appid": None}
@@ -675,6 +738,36 @@ _USER_AGENT = "risemode-smart-screen-driver/1.0"
 # at all, before the request even reaches their API or CDN.
 
 
+_sgdb_game_ids = {}  # game title -> SteamGridDB game id (for non-Steam games)
+
+
+def _sgdb_game_segment(game_id, api_key):
+    """The SteamGridDB API path piece that names this game: "steam/<appid>"
+    for a Steam game, or "game/<id>" for a Heroic one, found by searching
+    SteamGridDB for its title. None if that fails."""
+    if game_id.isdigit():
+        return f"steam/{game_id}"
+    info = _heroic_game_info(game_id)
+    if not info:
+        return None
+    title = info["title"]
+    if title not in _sgdb_game_ids:
+        request = urllib.request.Request(
+            f"{STEAMGRIDDB_API_BASE}/search/autocomplete/{urllib.parse.quote(title, safe='')}",
+            headers={"Authorization": f"Bearer {api_key}", "User-Agent": _USER_AGENT},
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=4) as resp:
+                results = json.loads(resp.read().decode()).get("data") or []
+        except (urllib.error.URLError, OSError, ValueError):
+            return None
+        if not results:
+            return None
+        exact = [r for r in results if _normalize_title(r.get("name")) == _normalize_title(title)]
+        _sgdb_game_ids[title] = (exact or results)[0].get("id")
+    return f"game/{_sgdb_game_ids[title]}" if _sgdb_game_ids[title] else None
+
+
 def _fetch_game_image(appid, api_key, *, endpoint, query, cache_dir, failures, rank_key):
     """Shared fetch/cache logic behind _fetch_game_grid_path() and
     _fetch_game_hero_path(): queries SteamGridDB's `endpoint` for `appid`,
@@ -685,8 +778,9 @@ def _fetch_game_image(appid, api_key, *, endpoint, query, cache_dir, failures, r
     configured, no network, no image available for this game, ...) so
     callers can fall back cleanly to the base background instead."""
     os.makedirs(cache_dir, exist_ok=True)
+    stem = _cache_name(appid)
     for ext in ("png", "jpg", "jpeg", "webp"):
-        cached = os.path.join(cache_dir, f"{appid}.{ext}")
+        cached = os.path.join(cache_dir, f"{stem}.{ext}")
         if os.path.isfile(cached):
             return cached
     if not api_key:
@@ -699,7 +793,10 @@ def _fetch_game_image(appid, api_key, *, endpoint, query, cache_dir, failures, r
         failures[appid] = time.time()
         return None
 
-    url = f"{STEAMGRIDDB_API_BASE}/{endpoint}/steam/{appid}?{query}"
+    segment = _sgdb_game_segment(appid, api_key)
+    if segment is None:
+        return _fail()
+    url = f"{STEAMGRIDDB_API_BASE}/{endpoint}/{segment}?{query}"
     request = urllib.request.Request(url, headers={
         "Authorization": f"Bearer {api_key}",
         "User-Agent": _USER_AGENT,
@@ -721,7 +818,7 @@ def _fetch_game_image(appid, api_key, *, endpoint, query, cache_dir, failures, r
     ext = image_url.rsplit(".", 1)[-1].split("?")[0].lower()
     if ext not in ("png", "jpg", "jpeg", "webp"):
         ext = "png"
-    dest = os.path.join(cache_dir, f"{appid}.{ext}")
+    dest = os.path.join(cache_dir, f"{stem}.{ext}")
     image_request = urllib.request.Request(image_url, headers={"User-Agent": _USER_AGENT})
     try:
         with urllib.request.urlopen(image_request, timeout=6) as resp:
@@ -796,12 +893,18 @@ def _fetch_steam_art(appid, kind, cache_dir, failures):
     involved. Cached into `cache_dir` like the SteamGridDB images (and
     failures cooled down the same way); None if nothing could be found."""
     os.makedirs(cache_dir, exist_ok=True)
-    dest = os.path.join(cache_dir, f"{appid}.jpg")
+    dest = os.path.join(cache_dir, f"{_cache_name(appid)}.jpg")
     if os.path.isfile(dest):
         return dest
     last_failure = failures.get(appid)
     if last_failure is not None and time.time() - last_failure < GAME_IMAGE_FETCH_RETRY_S:
         return None
+
+    if not appid.isdigit():
+        path = _fetch_heroic_game_art(appid, kind, cache_dir, failures, dest)
+        if not path:
+            failures[appid] = time.time()
+        return path
 
     for source, what in _STEAM_ART_SOURCES[kind]:
         try:
@@ -822,6 +925,60 @@ def _fetch_steam_art(appid, kind, cache_dir, failures):
             continue  # e.g. a 404 for that file name - try the next candidate
     failures[appid] = time.time()
     return None
+
+
+_steam_title_ids = {}  # normalized title -> Steam appid or None
+
+
+def _steam_appid_for_title(title):
+    """The Steam AppID of the game with exactly this title (ignoring case and
+    punctuation), via the public store search - so a game bought on Epic/GOG
+    that's also on Steam can use Steam's art. None when there's no exact match."""
+    key = _normalize_title(title)
+    if key not in _steam_title_ids:
+        request = urllib.request.Request(
+            "https://store.steampowered.com/api/storesearch/?cc=us&l=en&term="
+            + urllib.parse.quote(title, safe=""),
+            headers={"User-Agent": _USER_AGENT},
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=5) as resp:
+                items = json.loads(resp.read().decode()).get("items") or []
+        except (urllib.error.URLError, OSError, ValueError):
+            return None  # not cached - might just be offline right now
+        match = [i for i in items if i.get("type") == "app"
+                 and _normalize_title(i.get("name")) == key]
+        _steam_title_ids[key] = str(match[0]["id"]) if match else None
+    return _steam_title_ids[key]
+
+
+def _fetch_heroic_game_art(game_id, kind, cache_dir, failures, dest):
+    """Steam-source art for a Heroic game: the same title's Steam art if it
+    exists there, else the art Heroic itself has for the game (its portrait
+    `art_square`, or wide `art_background` / `art_cover`). Copied/saved to
+    `dest`; None if neither works."""
+    info = _heroic_game_info(game_id)
+    if not info:
+        return None
+    steam_id = _steam_appid_for_title(info["title"])
+    if steam_id:
+        path = _fetch_steam_art(steam_id, kind, cache_dir, failures)
+        if path:
+            shutil.copyfile(path, dest)
+            return dest
+    url = (info.get("art_square") if kind == "grid"
+           else info.get("art_background") or info.get("art_cover"))
+    if not url:
+        return None
+    try:
+        with urllib.request.urlopen(
+                urllib.request.Request(url, headers={"User-Agent": _USER_AGENT}), timeout=8) as resp:
+            data = resp.read()
+        with open(dest, "wb") as f:
+            f.write(data)
+    except (urllib.error.URLError, OSError):
+        return None
+    return dest
 
 
 def _fetch_steam_grid_path(appid, _api_key=None):

@@ -34,6 +34,7 @@ Legend: `[x]` done · `[ ]` planned · 💡 idea / maybe
 - [x] Crop axis forced by orientation — fit height for vertical, fit width for horizontal
 - [x] **Game Mode** — overlays the running Steam game's cover art while it's running, falls back to the base background otherwise
   - [x] Portrait grid for vertical orientation, wide hero (4K preferred) for horizontal
+  - [x] Heroic Games Launcher games (Epic/GOG/Amazon) detected via `HEROIC_APP_NAME`; art found by title; `setup_heroic_mangohud.py` enables MangoHud for them
   - [x] Choice of image source — SteamGridDB (API key) or Steam's official art (store CDN / local library cache, no key)
   - [x] Per-type disk cache + failure cooldown; `SteamAppId` env-var detection; Cloudflare-safe `User-Agent`
 

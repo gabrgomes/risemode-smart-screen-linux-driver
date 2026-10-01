@@ -19,6 +19,7 @@ Legend: `[x]` done · `[ ]` planned · 💡 idea / maybe
 - [x] FPS / frametime from MangoHud CSV logs (header-driven column parsing, no hardcoded order)
 - [x] Device-grouped layout (temp under usage; GPU secondaries on one line), °C degree symbols
 - [x] Per-sensor toggles; GPU temperature toggles independently of GPU usage
+- [x] CPU/RAM/temperature/GPU readings throttled to a once-a-second snapshot (`SENSOR_REFRESH_INTERVAL_S`) instead of re-measuring every render frame - stopped the percentages visibly flickering and the constant `nvidia-smi` spawning
 
 ### Now playing (music widget)
 - [x] `"music"` sensor — album art + title + artist + progress bar; shown while playing/paused, hidden otherwise

@@ -327,6 +327,34 @@ def get_gpu_stats():
         return None, None, None, None, None
 
 
+SENSOR_REFRESH_INTERVAL_S = 1.0  # how often CPU/RAM/temps/GPU are actually
+# re-measured. These used to be read fresh on every render frame (16/s in
+# "windows" mode) - which made CPU% and GPU% visibly flicker, since psutil's
+# cpu_percent() with no explicit interval reports usage over just the ~60ms
+# since the last call, a window short enough to swing wildly - and spawned
+# nvidia-smi as a subprocess 16 times a second for no real benefit, since
+# none of this changes meaningfully faster than about once a second anyway.
+
+_system_stats_cache = {"time": 0.0, "stats": None}
+
+
+def get_system_stats():
+    """(cpu%, mem%, cpu_temp, gpu_load, gpu_temp, gpu_vram_used,
+    gpu_vram_total, gpu_power) - a snapshot refreshed at most every
+    SENSOR_REFRESH_INTERVAL_S; the same values are reused for every render
+    frame in between, so the panel's numbers update at a calm, readable
+    pace regardless of how many frames per second are actually streamed."""
+    now = time.time()
+    cache = _system_stats_cache
+    if cache["stats"] is None or now - cache["time"] > SENSOR_REFRESH_INTERVAL_S:
+        cpu = psutil.cpu_percent()
+        mem = psutil.virtual_memory().percent
+        cpu_temp = get_cpu_temp()
+        cache["stats"] = (cpu, mem, cpu_temp) + get_gpu_stats()
+        cache["time"] = now
+    return cache["stats"]
+
+
 def get_cpu_temp():
     """Best-effort CPU package temperature via psutil/lm-sensors. Chip
     names vary by vendor/kernel (k10temp on AMD, coretemp on Intel) - prefer
@@ -1881,10 +1909,9 @@ def render_stats_pil(config=None, boxes=None):
                                      # stay untouched
     draw = ImageDraw.Draw(img)
 
-    cpu = psutil.cpu_percent()
-    mem = psutil.virtual_memory().percent
-    cpu_temp = get_cpu_temp()
-    gpu_load, gpu_temp, gpu_vram_used, gpu_vram_total, gpu_power = get_gpu_stats()
+    cpu, mem, cpu_temp, gpu_load, gpu_temp, gpu_vram_used, gpu_vram_total, gpu_power = (
+        get_system_stats()
+    )
     music = get_music_info() if sensors.get("music", True) else {}
 
     canvas_w, canvas_h = canvas_size
